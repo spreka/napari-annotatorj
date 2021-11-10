@@ -1,6 +1,6 @@
 site_name: napari-annotatorj
 site_description: The napari adaptation of the ImageJ/Fiji plugin AnnotatorJ for easy image annotation.
-site_author: RĂ©ka Hollandi
+site_author: Reka Hollandi
 
 theme: readthedocs
 
