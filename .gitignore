@@ -78,3 +78,6 @@ target/
 # written by setuptools_scm
 **/_version.py
 
+# testing
+demo/masks
+demo/img_ROIs_classes.zip

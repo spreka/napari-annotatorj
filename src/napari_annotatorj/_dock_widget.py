@@ -251,7 +251,7 @@ class AnnotatorJ(QWidget):
             xy=roiLayer.data[i] # a list of (x,y) coordinates in the wrong order
             yx=numpy.array([[y,x] for x,y in xy]) # swapping to (y,x) coordinates
             newRoi=ImagejRoi.frompoints(yx)
-            
+
             t=roiLayer.shape_type[i]
             if t=='polygon':
                 newRoi.roitype=ROI_TYPE.FREEHAND
@@ -259,6 +259,14 @@ class AnnotatorJ(QWidget):
                 newRoi.roitype=ROI_TYPE.RECT
             newRoi.name=roiLayer.properties['name'][i]
             newRoi.group=roiLayer.properties['class'][i]
+
+            # find edge colour
+            curColour=roiLayer.edge_color[i] # e.g. array([1., 0., 0., 1.]) is red
+            newRoi.stroke_color=bytes.fromhex(self.rgb2Hex(curColour))
+
+            # check version before saving; >=228 stores group attribute upon reading in ImageJ
+            if newRoi.version<228:
+                newRoi.version=228
 
             rois.append(newRoi)
 
@@ -351,6 +359,25 @@ class AnnotatorJ(QWidget):
         self.classColourLUT={}
         for x in classIdxs:
             self.classColourLUT.update({x:colours[x-1]}) # classes are only considered when class>0
+
+    def rgb2Hex(self,rgb):
+        # convert an array of rgb values to hex string representing colour
+        if rgb.dtype=='float64':
+            rgb=rgb*255
+        # ignore alpha
+        #rgb=rgb[:3]
+        s=''
+        if len(rgb)==4:
+            # with alpha
+            s=s+('%02x' % int(rgb[-1]))
+
+        for idx,k in enumerate(rgb):
+            if idx>2:
+                break
+            s=s+('%02x' % int(k))
+        print(s)
+        return s
+
 
     def findROIlayer(self,setLayer=False):
         for x in self.viewer.layers:
