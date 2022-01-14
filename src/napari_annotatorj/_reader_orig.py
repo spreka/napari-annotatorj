@@ -11,10 +11,6 @@ https://napari.org/docs/dev/plugins/for_plugin_developers.html
 """
 import numpy as np
 from napari_plugin_engine import napari_hook_implementation
-import os
-
-# supported image formats:
-exts=['.png','.bmp','.jpg','.jpeg','.tif','.tiff','.gif']
 
 
 @napari_hook_implementation
@@ -39,7 +35,7 @@ def napari_get_reader(path):
         path = path[0]
 
     # if we know we cannot read the file, we immediately return None.
-    if not os.path.splitext(path)[-1] in exts:
+    if not path.endswith(".npy"):
         return None
 
     # otherwise we return the *function* that can read ``path``.
@@ -68,7 +64,12 @@ def reader_function(path):
         Both "meta", and "layer_type" are optional. napari will default to
         layer_type=="image" if not provided
     """
-    data = path
+    # handle both a string and a list of strings
+    paths = [path] if isinstance(path, str) else path
+    # load all files into array
+    arrays = [np.load(_path) for _path in paths]
+    # stack arrays into single array
+    data = np.squeeze(np.stack(arrays))
 
     # optional kwargs for the corresponding viewer.add_* method
     add_kwargs = {}

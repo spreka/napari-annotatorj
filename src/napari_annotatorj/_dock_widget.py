@@ -13,7 +13,7 @@ from magicgui import magic_factory
 import os
 import skimage.io
 from roifile import ImagejRoi,ROI_TYPE,roiwrite
-from napari.layers import Shapes
+from napari.layers import Shapes, Image
 import numpy
 from qtpy.QtWidgets import QFileDialog
 #from napari.layers.Shapes import mode
@@ -66,10 +66,15 @@ class AnnotatorJ(QWidget):
         btnSave = QPushButton('Save')
         btnSave.clicked.connect(self.saveROIs)
 
+        # quick export
+        btnExport = QPushButton('[^]')
+        btnExport.clicked.connect(self.quickExport)
+
         self.setLayout(QHBoxLayout())
         self.layout().addWidget(btnOpen)
         self.layout().addWidget(btnLoad)
         self.layout().addWidget(btnSave)
+        self.layout().addWidget(btnExport)
 
         # greeting
         print('AnnotatorJ plugin is started | Happy annotations!')
@@ -414,6 +419,19 @@ class AnnotatorJ(QWidget):
             else:
                 pass
 
+
+    def findImageLayer(self):
+        for x in reversed(self.viewer.layers):
+            if (x.__class__ is Image):
+                print('{} is the uppermost image layer'.format(x.name))
+                # return it
+                return x
+            else:
+                pass
+        # log if the Image layer could not be found
+        print('Could not find the Image layer')
+
+
     def addROIdata(self,layer,rois):
         roiType='polygon' # default to this
         defColour='white'
@@ -639,6 +657,56 @@ class AnnotatorJ(QWidget):
         print(f'roiCount: {self.roiCount}')
         self.roiLayer=roiLayer
 
+
+    def quickExport(self):
+        # save the ImageJ ROI files as when pressing the "Save" button
+        self.saveROIs()
+
+        # construct mask file name
+        # set output folder and create it
+        selectedClass='masks'
+        mainExportFolder='labelled_masks'
+        exportFolder=os.path.join(self.defDir,selectedClass,mainExportFolder)
+        os.makedirs(exportFolder,exist_ok=True)
+        print('Created output folder: {}'.format(exportFolder))
+        maskFileName=str(os.path.join(exportFolder,'{}.tiff'.format(os.path.splitext(self.defFile)[0])))
+
+        # see if the roi layer is empty
+        roiLayer=self.findROIlayer()
+        roiCount=len(roiLayer.data)
+        print('annotated objects: {}'.format(roiCount))
+        if roiCount==0:
+            # empty shapes layer, nothing to save
+            print('No ROIs found to export')
+            return
+
+        # get the image size
+        imageLayer=self.findImageLayer()
+        if imageLayer is None:
+            print('Quick export failed')
+            return
+        s=imageLayer.data.shape
+
+        # export a mask image from the rois
+        labels = roiLayer.to_labels([s[0], s[1]])
+        labelLayer = self.viewer.add_labels(labels, name='labelled_mask')
+        labelLayer.visible = False
+
+        # save the mask image
+        savedSuccess=labelLayer.save(maskFileName,plugin='napari-annotatorj')
+        
+        if not savedSuccess:
+            # failed
+            print('Could not save exported image')
+        else:
+            # success
+            pass
+
+        # delete this label layer
+        self.viewer.layers.remove(labelLayer)
+
+        # bring the ROI layer forward
+        self.viewer.layers.selection.add(roiLayer)
 
 @napari_hook_implementation
 def napari_experimental_provide_dock_widget():

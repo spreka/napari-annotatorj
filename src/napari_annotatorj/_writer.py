@@ -8,13 +8,33 @@ Replace code below according to your needs
 """
 
 from napari_plugin_engine import napari_hook_implementation
+import skimage.io
+import numpy
+
+supported_layers = ['labels']
 
 
 @napari_hook_implementation
-def napari_get_writer():
-    pass
+def napari_get_writer(path, layer_types):
+	# Check that only supported layers have been passed
+	for x in set(layer_types):
+		if x not in supported_layers:
+			return None
+	
+	if isinstance(path, str) and path.endswith('.tiff'):
+		return napari_write_labels
+	else:
+		return None
+	return napari_write_labels
 
 
 @napari_hook_implementation
-def napari_write_image():
-    pass
+def napari_write_labels(path: str, data: numpy.ndarray, meta: dict):
+	if data is None:
+		return None
+	out=data.astype('uint16')
+	skimage.io.imsave(path,out,check_contrast=False)
+	print('Saved exported image: {}'.format(path))
+	print('---------------------')
+
+	return path
