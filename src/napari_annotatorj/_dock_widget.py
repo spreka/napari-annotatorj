@@ -20,6 +20,7 @@ from qtpy.QtCore import Qt
 #from napari.layers.Shapes import mode
 from napari.layers.shapes import _shapes_key_bindings as key_bindings
 from napari.layers.shapes import _shapes_mouse_bindings as mouse_bindings
+from napari.layers.labels import _labels_mouse_bindings as labels_mouse_bindings
 import warnings
 from cv2 import cv2
 from copy import deepcopy
@@ -679,6 +680,7 @@ class AnnotatorJ(QWidget):
         elif self.startedEditing:
             msg='Already started editing a contour'
             warnings.warn(msg)
+            return
 
         yield
 
@@ -716,7 +718,6 @@ class AnnotatorJ(QWidget):
                 print('Selected \'{}\' ROI for editing'.format(roiLayer.properties['name'][curIdx]))
 
                 curColour=roiLayer._data_view._edge_color[curIdx]
-                print('curColour: {}'.format(curColour))
 
                 # store the orig properties of this shape so after editing is finished it can be restored
                 self.origEditedROI=BackupROI(roiLayer.data[curIdx],idx=curIdx,edgeColour=deepcopy(curColour),edgeWidth=deepcopy(roiLayer._data_view.edge_widths[curIdx]))
@@ -745,20 +746,16 @@ class AnnotatorJ(QWidget):
                 #roiLayer.mode='add_polygon';
                 labelLayer.mode='paint'
                 labelLayer.brush_size=self.brushSize
-                '''
-                @labelLayer.bind_key('q')
-                def callAcceptEdit(labelLayer):
-                    print('started callAcceptEdit fcn')
-                    shape=AnnotatorJ.acceptEdit(labelLayer)
-                    if shape is None:
-                        print('Failed contour editing')
-                '''
+
+                # add a modifier to the paint tool to erase when 'alt' is held
+                labelLayer.mouse_drag_callbacks.insert(0,self.eraseBrush2)
 
                 # bind the shortcut 'q' to acceptEdit function
                 # 'ctrl+q' is by default bound to exit, so no ctrl here
                 labelLayer.bind_key('q',func=self.acceptEdit)
                 #labelLayer.bind_key('q',func=self.warnMissingCtrl)
                 labelLayer.bind_key('Escape',func=self.rejectEdit)
+                labelLayer.bind_key('Control-Delete',func=self.deleteEdit)
 
             else:
                 print('Could not find the ROI associated with the selected point on the image.')
@@ -817,17 +814,11 @@ class AnnotatorJ(QWidget):
             roiLayer.refresh()
             print('Saved edited ROI')
 
+            # store updated brush size
+            self.brushSize=labelLayer.brush_size
+
             # clear everything
-
-            self.startedEditing=False
-            self.editROIidx=-1
-            self.origEditedROI=None
-
-            # delete this label layer
-            self.viewer.layers.remove(labelLayer)
-
-            # bring the ROI layer forward
-            self.viewer.layers.selection.add(roiLayer)
+            self.cleanUpAfterEdit(labelLayer,roiLayer)
 
             return shape
         else:
@@ -842,6 +833,8 @@ class AnnotatorJ(QWidget):
             return
         yield
 
+        print('Esc pressed - restoring original contour')
+
         roiLayer=self.findROIlayer()
         shape=self.origEditedROI.shape
         if shape is None:
@@ -852,9 +845,38 @@ class AnnotatorJ(QWidget):
             roiLayer._data_view.update_edge_color(self.editROIidx,self.origEditedROI.edgeColour)
             roiLayer._data_view.update_edge_width(self.editROIidx,self.origEditedROI.edgeWidth)
             roiLayer.refresh()
+            print('Restored edited ROI to its original')
+
+        # store updated brush size
+        self.brushSize=labelLayer.brush_size
 
         # clear everything
+        self.cleanUpAfterEdit(labelLayer,roiLayer)
 
+
+    def deleteEdit(self,labelLayer):
+        if not self.startedEditing:
+            print('Cannot delete current contour when not \'startedEditing\'')
+            return
+        yield
+
+        print('Ctrl+delete pressed - deleting current contour')
+
+        roiLayer=self.findROIlayer()
+        #roiLayer._data_view.remove(self.editROIidx)
+        roiLayer.selected_data={self.editROIidx}
+        roiLayer.remove_selected()
+        roiLayer.refresh()
+        print('Restored edited ROI to its original')
+
+        # store updated brush size
+        self.brushSize=labelLayer.brush_size
+
+        # clear everything
+        self.cleanUpAfterEdit(labelLayer,roiLayer)
+
+
+    def cleanUpAfterEdit(self,labelLayer,roiLayer):
         self.startedEditing=False
         self.editROIidx=-1
         self.origEditedROI=None
@@ -872,6 +894,28 @@ class AnnotatorJ(QWidget):
             msg='missing Ctrl --> cannot update current contour'
             warnings.warn(msg)
 
+
+    def eraseBrush(self,layer,event):
+        if 'Alt' in event.modifiers:
+            # erase instead of painting
+            layer.selected_label=layer._background_label
+            yield
+        else:
+            # reset to painting
+            layer.selected_label=layer._background_label+1
+            yield
+
+    def eraseBrush2(self,layer,event):
+        if 'Alt' in event.modifiers:
+            # erase instead of painting
+            if layer.mode=='paint':
+                layer.mode='erase'
+            yield
+        else:
+            # reset to painting
+            if layer.mode=='erase':
+                layer.mode='paint'
+            yield
 
 
     def updateNewROIprops(self,event):
