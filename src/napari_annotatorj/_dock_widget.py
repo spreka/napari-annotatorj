@@ -7,7 +7,7 @@ see: https://napari.org/docs/dev/plugins/hook_specifications.html
 Replace code below according to your needs.
 """
 from napari_plugin_engine import napari_hook_implementation
-from qtpy.QtWidgets import QWidget, QHBoxLayout, QPushButton
+from qtpy.QtWidgets import QWidget, QHBoxLayout, QPushButton, QCheckBox
 from magicgui import magic_factory
 
 import os
@@ -16,9 +16,13 @@ from roifile import ImagejRoi,ROI_TYPE,roiwrite
 from napari.layers import Shapes, Image
 import numpy
 from qtpy.QtWidgets import QFileDialog
+from qtpy.QtCore import Qt
 #from napari.layers.Shapes import mode
 from napari.layers.shapes import _shapes_key_bindings as key_bindings
 from napari.layers.shapes import _shapes_mouse_bindings as mouse_bindings
+import warnings
+from cv2 import cv2
+from copy import deepcopy
 
 
 class AnnotatorJ(QWidget):
@@ -53,6 +57,11 @@ class AnnotatorJ(QWidget):
         self.testMode=False # for initial testing
         self.defDir=''
         self.defFile=''
+        self.editMode=False
+        self.startedEditing=False
+        self.editROIidx=-1
+        self.origEditedROI=None
+        self.brushSize=5
 
         # ---------------------------
         # add buttons and ui elements
@@ -70,11 +79,17 @@ class AnnotatorJ(QWidget):
         btnExport = QPushButton('[^]')
         btnExport.clicked.connect(self.quickExport)
 
+        # edit mode
+        chkEdit = QCheckBox('Edit mode')
+        chkEdit.setChecked(False)
+        chkEdit.stateChanged.connect(self.setEditMode)
+
         self.setLayout(QHBoxLayout())
         self.layout().addWidget(btnOpen)
         self.layout().addWidget(btnLoad)
         self.layout().addWidget(btnSave)
         self.layout().addWidget(btnExport)
+        self.layout().addWidget(chkEdit)
 
         # greeting
         print('AnnotatorJ plugin is started | Happy annotations!')
@@ -82,6 +97,8 @@ class AnnotatorJ(QWidget):
     def openNew(self):
         # temporarily open a test image
         # later this will start a browser dialog to select the input image file
+        self.editMode=False
+
         if self.testMode==True:
             if os.path.exists(self.test_image):
                 img=skimage.io.imread(self.test_image)
@@ -147,7 +164,10 @@ class AnnotatorJ(QWidget):
         # select the "select shape" mode from the controls by default
         shapesLayer.mode = 'select'
 
-        self.addFreeROIdrawing()
+        self.addFreeROIdrawing(shapesLayer)
+        self.addKeyBindings(shapesLayer)
+
+        self.viewer.reset_view()
 
     def loadROIs2(self):
         # temporarily load a test ImageJ ROI.zip file with contours created in ImageJ and saved with AnnotatorJ
@@ -214,7 +234,7 @@ class AnnotatorJ(QWidget):
         '''
 
         # 
-        self.addFreeROIdrawing()
+        self.addFreeROIdrawing(shapesLayer)
         # TODO
 
     def add2RoiManager(self,rois):
@@ -384,9 +404,9 @@ class AnnotatorJ(QWidget):
         return s
 
 
-    def findROIlayer(self,setLayer=False):
+    def findROIlayer(self,setLayer=False,layerName='ROI'):
         for x in self.viewer.layers:
-            if (x.__class__ is Shapes and x.name=='ROI'):
+            if (x.__class__ is Shapes and x.name==layerName):
                 print('{} is the ROI shapes layer'.format(x.name))
                 # bring it to the front
                 n=len(self.viewer.layers)
@@ -403,6 +423,7 @@ class AnnotatorJ(QWidget):
                 pass
         # log if the ROI layer could not be found
         print('Could not find the ROI layer')
+        return None
 
     def renameROIlayers(self):
         for x in self.viewer.layers:
@@ -420,10 +441,11 @@ class AnnotatorJ(QWidget):
                 pass
 
 
-    def findImageLayer(self):
+    def findImageLayer(self,echo=True):
         for x in reversed(self.viewer.layers):
             if (x.__class__ is Image):
-                print('{} is the uppermost image layer'.format(x.name))
+                if echo:
+                    print('{} is the uppermost image layer'.format(x.name))
                 # return it
                 return x
             else:
@@ -561,7 +583,16 @@ class AnnotatorJ(QWidget):
 
 
     # add mouse event handler for free roi drawing on the shapes layer
-    def addFreeROIdrawing(self):
+    def addFreeROIdrawing(self,shapesLayer=None):
+        if shapesLayer is not None:
+            shapesLayer.events.data.connect(self.updateNewROIprops,position='last')
+            shapesLayer.mouse_drag_callbacks.append(self.freeHandROI)
+            shapesLayer.mouse_drag_callbacks.append(self.editROI)
+        else:
+            return
+        return
+
+        '''
         for x in self.viewer.layers:
             if x.__class__ is not Shapes:
                 pass
@@ -574,61 +605,274 @@ class AnnotatorJ(QWidget):
 
                 # add a listener to mouse drags in polygon adding mode to mimic freehand roi drawing
                 @x.mouse_drag_callbacks.append
-                def freeHandROI(layer, event):
-                    #data_coordinates = layer.world_to_data(event.position)
-                    #cords = numpy.round(data_coordinates).astype(int)
-                    #print('Clicked at {} on layer {}'.format(cords,layer.name))
-                    yield
-                    #layer.data[0] is an array of points in the shape
+        '''
+    def freeHandROI(self,layer, event):
+        #data_coordinates = layer.world_to_data(event.position)
+        #cords = numpy.round(data_coordinates).astype(int)
+        #print('Clicked at {} on layer {}'.format(cords,layer.name))
+        yield
+        #layer.data[0] is an array of points in the shape
 
-                    if layer.mode=='add_polygon':
-                        dragged=False
-                        freeCoords=[]
-                        defColour='white'
-                        # on move
-                        while event.type == 'mouse_move':
-                            dragged = True
-                            coords = list(layer.world_to_data(event.position))
-                            freeCoords.append(coords)
-                            yield
-                        # on release
-                        if dragged:
-                            # drag ended
-                            # mimic an 'esc' key press to quit the basic add_polygon method
-                            key_bindings.finish_drawing_shape(layer)
-                            print(freeCoords)
-                            # add the coords as a new shape
-                            layer.add(data=freeCoords,shape_type='polygon',edge_width=0.5,edge_color=defColour,face_color=[0,0,0,0])
-                        # else: do nothing
-                        #    print('clicked!')
-                    # else: do nothing
-                    #    print('---- not in adding mode ----')
+        if layer.mode=='add_polygon':
+            dragged=False
+            freeCoords=[]
+            defColour='white'
+            # on move
+            while event.type == 'mouse_move':
+                dragged = True
+                coords = list(layer.world_to_data(event.position))
+                freeCoords.append(coords)
+                yield
+            # on release
+            if dragged:
+                # drag ended
+                # mimic an 'esc' key press to quit the basic add_polygon method
+                key_bindings.finish_drawing_shape(layer)
+                print(freeCoords)
+                # add the coords as a new shape
+                layer.add(data=freeCoords,shape_type='polygon',edge_width=0.5,edge_color=defColour,face_color=[0,0,0,0])
+            # else: do nothing
+            #    print('clicked!')
+        # else: do nothing
+        #    print('---- not in adding mode ----')
 
-                # this does not work yet:
-                #@x.mouse_drag_callbacks.append
-                def freeHandROIvis(layer, event):
-                    yield
-                    if layer.mode=='add_polygon':
-                        dragged=False
-                        defColour='white'
-                        # on move
-                        while event.type == 'mouse_move':
-                            dragged = True
-                            coords = list(layer.world_to_data(event.position))
-                            # this is not working yet:
-                            mouse_bindings.vertex_insert(layer,event)
-                            yield
-                        # on release
-                        if dragged:
-                            # drag ended
-                            # mimic an 'esc' key press to quit the basic add_polygon method
-                            key_bindings.finish_drawing_shape(layer)
-                        # else: do nothing
-                        #    print('clicked!')
-                    # else: do nothing
-                    #    print('---- not in adding mode ----')
+    # this does not work yet:
+    #@x.mouse_drag_callbacks.append
+    def freeHandROIvis(layer, event):
+        yield
+        if layer.mode=='add_polygon':
+            dragged=False
+            defColour='white'
+            # on move
+            while event.type == 'mouse_move':
+                dragged = True
+                coords = list(layer.world_to_data(event.position))
+                # this is not working yet:
+                mouse_bindings.vertex_insert(layer,event)
+                yield
+            # on release
+            if dragged:
+                # drag ended
+                # mimic an 'esc' key press to quit the basic add_polygon method
+                key_bindings.finish_drawing_shape(layer)
+            # else: do nothing
+            #    print('clicked!')
+        # else: do nothing
+        #    print('---- not in adding mode ----')
 
+
+    # add a listener to clicks on shapes when in edit mode
+    #@x.mouse_drag_callbacks.append
+    def editROI(self,layer,event):
+        # only do something when in edit mode
+        if not self.editMode:
+            return
+        if layer.mode=='add_polygon' and not self.startedEditing:
+            msg='Cannot start editing when {} is selected. Please select {}'.format(
+                '\'Add polygons(P)\'','\'Select shapes(5)\'')
+            warnings.warn(msg)
+            return
+        elif layer.mode!='select' and not self.startedEditing:
+            msg='Cannot start editing. Please select {}'.format('\'Select shapes(5)\'')
+            warnings.warn(msg)
+            return
+        elif self.startedEditing:
+            msg='Already started editing a contour'
+            warnings.warn(msg)
+
+        yield
+
+        # start edit mode
+        self.startedEditing=True
+
+        pos=layer.world_to_data(event.position)
+
+        # get the image size
+        imageLayer=self.findImageLayer(echo=False)
+        if imageLayer is None:
+            print('No image layer found')
+            self.startedEditing=False
+            return
+        s=imageLayer.data.shape
+        
+        if pos[0]<=0 or pos[1]<=0 or pos[0]>s[1] or pos[1]>s[0]:
+            print('(Edit mode) not on the image')
+            self.startedEditing=False
+            self.origEditedROI=None
+            self.editROIidx=-1
+        else:
+            print('(Edit mode) click on {}'.format(pos))
+
+            roiLayer=self.findROIlayer()
+            if roiLayer is None:
+                return
+
+            # check if the user clicked on a shape
+            if len(roiLayer.selected_data)>0:
+                # clicked on a shape
+                # get the index of the shape and remove the selection in one go
+                curIdx=roiLayer.selected_data.pop()
+                #print('Selected {}. roi: {}'.format(curIdx,roiLayer.properties['name'][curIdx]))
+                print('Selected \'{}\' ROI for editing'.format(roiLayer.properties['name'][curIdx]))
+
+                curColour=roiLayer._data_view._edge_color[curIdx]
+                print('curColour: {}'.format(curColour))
+
+                # store the orig properties of this shape so after editing is finished it can be restored
+                self.origEditedROI=BackupROI(roiLayer.data[curIdx],idx=curIdx,edgeColour=deepcopy(curColour),edgeWidth=deepcopy(roiLayer._data_view.edge_widths[curIdx]))
+                self.editROIidx=curIdx
+
+                # change the edge to show it is the selected one
+                invColour=self.invertColour(curColour)
+                roiLayer._data_view.update_edge_color(curIdx,invColour)
+                roiLayer._data_view.update_edge_width(curIdx,2)
+                roiLayer.refresh()
+                #roiLayer.events.edge_color()
+                #roiLayer.events.edge_width()
                 
+                # make a temp labels layer for editing the selected shape
+                # copy the selected shape to a temp shapes layer then convert to a labels layer
+                shapesLayer=Shapes(data=roiLayer.data[curIdx],shape_type='polygon',name='ROI tmp',edge_width=2,edge_color=invColour,face_color=[0,0,0,0])
+                self.viewer.add_layer(shapesLayer)
+                roiLayerCopy=self.findROIlayer(layerName='ROI tmp')
+                labels = roiLayerCopy.to_labels([s[0], s[1]])
+                labelLayer = self.viewer.add_labels(labels, name='editing')
+                # delete this temp shape layer
+                self.viewer.layers.remove(shapesLayer)
+
+
+                # set the tool for an editing-capable one
+                #roiLayer.mode='add_polygon';
+                labelLayer.mode='paint'
+                labelLayer.brush_size=self.brushSize
+                '''
+                @labelLayer.bind_key('q')
+                def callAcceptEdit(labelLayer):
+                    print('started callAcceptEdit fcn')
+                    shape=AnnotatorJ.acceptEdit(labelLayer)
+                    if shape is None:
+                        print('Failed contour editing')
+                '''
+
+                # bind the shortcut 'q' to acceptEdit function
+                # 'ctrl+q' is by default bound to exit, so no ctrl here
+                labelLayer.bind_key('q',func=self.acceptEdit)
+                #labelLayer.bind_key('q',func=self.warnMissingCtrl)
+                labelLayer.bind_key('Escape',func=self.rejectEdit)
+
+            else:
+                print('Could not find the ROI associated with the selected point on the image.')
+                self.startedEditing=False
+                self.origEditedROI=None
+                self.editROIidx=-1
+
+
+    
+
+    def invertColour(self,origColour):
+        # invCol is like numpy.array([0.2,0.,0.,1.])
+        invCol=numpy.array([1.,1.,1.,1.])-origColour
+        # the last element is alpha, keep it on 100% so it is visible
+        invCol[-1]=1.
+        return invCol
+
+
+    def addKeyBindings(self,layer):
+        #viewer=self.viewer
+
+        '''
+        # "q" in editMode will accept the contour edit
+        #@viewer.bind_key('q')
+        @layer.bind_key('q')
+        def bindQ(layer,event):
+        #def bindQ(viewer,event):
+            if self.startedEditing:
+                self.acceptEdit(layer,event)
+
+            def acceptEdit(viewer):
+                pass
+                # self._data_view.edit(index, vertices[:-1]) <-- new data
+            yield
+        '''
+
+
+    def acceptEdit(self,labelLayer):
+        if not self.startedEditing:
+            print('Cannot accept edited contour when not \'startedEditing\'')
+            return
+        yield
+
+        print('Q pressed - updating edited contour')
+        # convert the edited shape on the temp labels layer to shape
+        mask=labelLayer.data
+        contour,hierarchy=cv2.findContours(mask.astype(numpy.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        if contour:
+            # not empty
+            shape=numpy.array(numpy.fliplr(numpy.squeeze(contour)))
+            roiLayer=self.findROIlayer()
+            roiLayer._data_view.edit(self.editROIidx,shape)
+            # reset colour and width
+            roiLayer._data_view.update_edge_color(self.editROIidx,self.origEditedROI.edgeColour)
+            roiLayer._data_view.update_edge_width(self.editROIidx,self.origEditedROI.edgeWidth)
+            roiLayer.refresh()
+            print('Saved edited ROI')
+
+            # clear everything
+
+            self.startedEditing=False
+            self.editROIidx=-1
+            self.origEditedROI=None
+
+            # delete this label layer
+            self.viewer.layers.remove(labelLayer)
+
+            # bring the ROI layer forward
+            self.viewer.layers.selection.add(roiLayer)
+
+            return shape
+        else:
+            # no contour found
+            print('Could not find the contour after editing')
+            return None
+
+
+    def rejectEdit(self,labelLayer):
+        if not self.startedEditing:
+            print('Cannot reject edited contour when not \'startedEditing\'')
+            return
+        yield
+
+        roiLayer=self.findROIlayer()
+        shape=self.origEditedROI.shape
+        if shape is None:
+            print('Failed to find previous version of this ROI, cannot revert to it')
+        else:
+            roiLayer._data_view.edit(self.editROIidx,shape)
+            # reset colour and width
+            roiLayer._data_view.update_edge_color(self.editROIidx,self.origEditedROI.edgeColour)
+            roiLayer._data_view.update_edge_width(self.editROIidx,self.origEditedROI.edgeWidth)
+            roiLayer.refresh()
+
+        # clear everything
+
+        self.startedEditing=False
+        self.editROIidx=-1
+        self.origEditedROI=None
+
+        # delete this label layer
+        self.viewer.layers.remove(labelLayer)
+
+        # bring the ROI layer forward
+        self.viewer.layers.selection.add(roiLayer)
+
+
+    def warnMissingCtrl(self,layer):
+        if self.editMode and self.startedEditing:
+            # ctrl+q already bound to exit
+            msg='missing Ctrl --> cannot update current contour'
+            warnings.warn(msg)
+
+
 
     def updateNewROIprops(self,event):
         roiLayer=self.findROIlayer()
@@ -656,6 +900,12 @@ class AnnotatorJ(QWidget):
         self.roiCount+=1
         print(f'roiCount: {self.roiCount}')
         self.roiLayer=roiLayer
+
+
+    def initROItextProps(self):
+        roiLayer=self.findROIlayer()
+        initProps={'name': array(['0001'], dtype='<U4'),'class': array([0]),'nameInt': array([1])}
+        roiLayer.text.add(initProps,1)
 
 
     def quickExport(self):
@@ -707,6 +957,59 @@ class AnnotatorJ(QWidget):
 
         # bring the ROI layer forward
         self.viewer.layers.selection.add(roiLayer)
+
+
+    def setEditMode(self,state):
+        if state == Qt.Checked:
+            self.editMode=True
+            print('Edit mode selected')
+
+            # set the "select shapes" mode
+            shapesLayer=self.findROIlayer()
+            shapesLayer.mode = 'select'
+
+        else:
+            self.editMode=False
+            print('Edit mode cleared')
+
+
+# -------------------------------------
+# end of class AnnotatorJ
+# -------------------------------------
+
+class BackupROI():
+    def __init__(self,shape,idx=0,edgeColour=numpy.array([1.,1.,1.,1.]),faceColour=numpy.array([0.,0.,0.,0.]),edgeWidth=0.5):
+        self.shape=shape
+        self.idx=idx
+        self.edgeColour=edgeColour
+        self.faceColour=faceColour
+        self.edgeWidth=edgeWidth
+
+    def setShape(self,shape):
+        self.shape=shape
+
+    def setIdx(self,idx):
+        self.idx=idx
+
+    def setEdgeColour(self,colour):
+        self.edgeColour=colour
+
+    def setFaceColour(self,colour):
+        self.faceColour=colour
+
+    def setEdgeWidth(self,width):
+        self.edgeWidth=width
+
+    def toString(self):
+        print('shape: {}\nidx: {}\nedgeColour: {}\nfaceColour: {}\nedgeWidth: {}'.format(self.shape,self.idx,self.edgeColour,self.faceColour,self.edgeWidth))
+
+    def toStringNoShape(self):
+        print('idx: {}\nedgeColour: {}\nfaceColour: {}\nedgeWidth: {}'.format(self.idx,self.edgeColour,self.faceColour,self.edgeWidth))
+
+# -------------------------------------
+# end of class BackupROI
+# -------------------------------------
+
 
 @napari_hook_implementation
 def napari_experimental_provide_dock_widget():
