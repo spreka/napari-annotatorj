@@ -7,7 +7,7 @@ see: https://napari.org/docs/dev/plugins/hook_specifications.html
 Replace code below according to your needs.
 """
 from napari_plugin_engine import napari_hook_implementation
-from qtpy.QtWidgets import QWidget, QHBoxLayout, QPushButton, QCheckBox
+from qtpy.QtWidgets import QWidget, QHBoxLayout,QVBoxLayout, QPushButton, QCheckBox,QLabel
 from magicgui import magic_factory
 
 import os
@@ -63,6 +63,7 @@ class AnnotatorJ(QWidget):
         self.editROIidx=-1
         self.origEditedROI=None
         self.brushSize=5
+        self.imgSize=None
 
         # ---------------------------
         # add buttons and ui elements
@@ -80,20 +81,102 @@ class AnnotatorJ(QWidget):
         btnExport = QPushButton('[^]')
         btnExport.clicked.connect(self.quickExport)
 
+        # checkboxes
         # edit mode
         chkEdit = QCheckBox('Edit mode')
         chkEdit.setChecked(False)
+        chkEdit.setToolTip('Allows switching to contour edit mode. Select with mouse click, accept with "q".')
         chkEdit.stateChanged.connect(self.setEditMode)
 
+        # add auto mode
+        chkAuto = QCheckBox('Add automatically')
+        chkAuto.setChecked(True)
+        chkAuto.setEnabled(False)
+        chkAuto.setToolTip('Adds contours to annotations, always active (used in the ImageJ version)')
+        chkAuto.setStyleSheet("color: gray")
+        # smooth mode
+        chkSmooth = QCheckBox('Smooth')
+        chkSmooth.setToolTip('Applies smoothing to contour')
+        chkSmooth.setChecked(False)
+        #chkSmooth.stateChanged.connect(self.setSmooth)
+        # show contours
+        chkShowContours = QCheckBox('Show contours')
+        chkShowContours.setChecked(True)
+        chkShowContours.stateChanged.connect(self.showCnt)
+        # assist mode
+        chkAssist = QCheckBox('Contour assist')
+        chkAssist.setChecked(False)
+        #chkAssist.stateChanged.connect(self.setContourAssist)
+        # show overlay
+        chkShowOverlay = QCheckBox('Show overlay')
+        chkShowOverlay.setChecked(False)
+        #chkShowOverlay.stateChanged.connect(self.showOverlay)
+        # class mode
+        chkClass = QCheckBox('Class mode')
+        chkClass.setChecked(False)
+        #chkClass.stateChanged.connect(self.setClassMode)
+
+
+        # add labels
+        roiLabel=QLabel('ROIs')
+        nameLabel=QLabel('(1/1) [image name]')
+
+        # set layouts
+        mainVbox=QVBoxLayout()
+        hBoxTitle=QHBoxLayout()
+        hBoxUp=QHBoxLayout()
+        hBoxDown=QHBoxLayout()
+        vBoxLeft=QVBoxLayout()
+        hBoxRight=QHBoxLayout()
+        vBoxRightReal=QVBoxLayout()
+        vBoxRightDummy=QVBoxLayout()
+
+        hBoxTitle.addWidget(roiLabel)
+
+        vBoxLeft.setAlignment(Qt.AlignTop)
+        vBoxLeft.addWidget(chkAuto)
+        vBoxLeft.addWidget(chkSmooth)
+        vBoxLeft.addWidget(chkShowContours)
+        vBoxLeft.addWidget(chkAssist)
+        vBoxLeft.addWidget(chkShowOverlay)
+        vBoxLeft.addWidget(chkEdit)
+        vBoxLeft.addWidget(chkClass)
+
+        # add dummy buttons as spacers
+        vBoxRightDummy.setAlignment(Qt.AlignTop)
+        vBoxRightDummy.addSpacing(54)
+        vBoxRightDummy.addWidget(btnExport)
+        
+        vBoxRightReal.setAlignment(Qt.AlignTop)
+        vBoxRightReal.addWidget(btnOpen)
+        vBoxRightReal.addWidget(btnLoad)
+        vBoxRightReal.addWidget(btnSave)
+
+        hBoxDown.addWidget(nameLabel)
+
+        hBoxRight.addLayout(vBoxRightDummy)
+        hBoxRight.addLayout(vBoxRightReal)
+
+        hBoxUp.addLayout(vBoxLeft)
+        hBoxUp.addLayout(hBoxRight)
+        mainVbox.addLayout(hBoxTitle)
+        mainVbox.addLayout(hBoxUp)
+        mainVbox.addLayout(hBoxDown)
+
+        self.setLayout(mainVbox)
+
+        '''
         self.setLayout(QHBoxLayout())
         self.layout().addWidget(btnOpen)
         self.layout().addWidget(btnLoad)
         self.layout().addWidget(btnSave)
         self.layout().addWidget(btnExport)
         self.layout().addWidget(chkEdit)
+        '''
 
         # greeting
-        print('AnnotatorJ plugin is started | Happy annotations!')
+        #print('AnnotatorJ plugin is started | Happy annotations!')
+        print('----------------------------\nAnnotatorJ plugin is started\nHappy annotations!\n----------------------------')
 
     def openNew(self):
         # temporarily open a test image
@@ -163,7 +246,9 @@ class AnnotatorJ(QWidget):
         print('Loaded {} ROIs successfully'.format(len(rois)))
 
         # select the "select shape" mode from the controls by default
-        shapesLayer.mode = 'select'
+        #shapesLayer.mode = 'select'
+        # select the "add polygon" mode from the controls by default to enable freehand ROI drawing
+        shapesLayer.mode = 'add_polygon'
 
         self.addFreeROIdrawing(shapesLayer)
         self.addKeyBindings(shapesLayer)
@@ -201,7 +286,9 @@ class AnnotatorJ(QWidget):
         print('Loaded {} ROIs successfully'.format(len(rois)))
 
         # select the "select shape" mode from the controls by default
-        shapesLayer.mode = 'select'
+        #shapesLayer.mode = 'select'
+        # select the "add polygon" mode from the controls by default to enable freehand ROI drawing
+        shapesLayer.mode = 'add_polygon'
 
     def initRoiManager(self):
         # the rois will be stored in this object as in ImageJ's RoiManager
@@ -218,7 +305,9 @@ class AnnotatorJ(QWidget):
         shapesLayer=Shapes(data=None,shape_type='polygon',name='ROI',edge_width=0.5,edge_color='white',face_color=[0,0,0,0],properties=None,text=roiTextProps)
         self.viewer.add_layer(shapesLayer)
         # select the "select shape" mode from the controls by default
-        shapesLayer.mode = 'select'
+        #shapesLayer.mode = 'select'
+        # select the "add polygon" mode from the controls by default to enable freehand ROI drawing
+        shapesLayer.mode = 'add_polygon'
 
         '''
         # mock a dummy shape adding for properties
@@ -696,6 +785,7 @@ class AnnotatorJ(QWidget):
             self.startedEditing=False
             return
         s=imageLayer.data.shape
+        self.imgSize=s
         
         if pos[0]<=0 or pos[1]<=0 or pos[0]>s[1] or pos[1]>s[0]:
             print('(Edit mode) not on the image')
@@ -737,15 +827,20 @@ class AnnotatorJ(QWidget):
                 self.viewer.add_layer(shapesLayer)
                 roiLayerCopy=self.findROIlayer(layerName='ROI tmp')
                 labels = roiLayerCopy.to_labels([s[0], s[1]])
-                labelLayer = self.viewer.add_labels(labels, name='editing')
                 # delete this temp shape layer
                 self.viewer.layers.remove(shapesLayer)
+                roiLayer.visible=False
+                # convert to labels layer
+                labelLayer = self.viewer.add_labels(labels, name='editing')
+
+                roiLayer.visible=True
 
 
                 # set the tool for an editing-capable one
                 #roiLayer.mode='add_polygon';
                 labelLayer.mode='paint'
                 labelLayer.brush_size=self.brushSize
+                labelLayer.opacity=0.5
 
                 # add a modifier to the paint tool to erase when 'alt' is held
                 labelLayer.mouse_drag_callbacks.insert(0,self.eraseBrush2)
@@ -805,6 +900,22 @@ class AnnotatorJ(QWidget):
         contour,hierarchy=cv2.findContours(mask.astype(numpy.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         if contour:
             # not empty
+            if len(contour)>1:
+                # fill holes to create 1 object
+                if self.imgSize is not None:
+                    from scipy.ndimage import binary_fill_holes
+                    filled=numpy.zeros((self.imgSize[0],self.imgSize[1]),dtype=numpy.uint8)
+                    binary_fill_holes(mask,output=filled)
+                    contour,hierarchy=cv2.findContours(filled.astype(numpy.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                    if not (contour and len(contour)==1):
+                        msg='Cannot create roi from this label'
+                        warnings.warn(msg)
+                        return None
+                else:
+                    msg='Cannot create roi from this label'
+                    warnings.warn(msg)
+                    return None
+
             shape=numpy.array(numpy.fliplr(numpy.squeeze(contour)))
             roiLayer=self.findROIlayer()
             roiLayer._data_view.edit(self.editROIidx,shape)
@@ -886,6 +997,10 @@ class AnnotatorJ(QWidget):
 
         # bring the ROI layer forward
         self.viewer.layers.selection.add(roiLayer)
+
+        if roiLayer.selected_data:
+            roiLayer.selected_data.pop()
+        roiLayer.mode='select'
 
 
     def warnMissingCtrl(self,layer):
@@ -1004,17 +1119,30 @@ class AnnotatorJ(QWidget):
 
 
     def setEditMode(self,state):
+        shapesLayer=self.findROIlayer()
         if state == Qt.Checked:
             self.editMode=True
             print('Edit mode selected')
 
             # set the "select shapes" mode
-            shapesLayer=self.findROIlayer()
             shapesLayer.mode = 'select'
 
         else:
             self.editMode=False
             print('Edit mode cleared')
+            # set the "add polygon" mode
+            shapesLayer.mode = 'add_polygon'
+
+
+    def showCnt(self,state):
+        shapesLayer=self.findROIlayer()
+        if state == Qt.Checked:
+            print('Show contours selected')
+            shapesLayer.visible=True
+
+        else:
+            print('Show contours cleared')
+            shapesLayer.visible=False
 
 
 # -------------------------------------
