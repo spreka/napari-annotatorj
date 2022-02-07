@@ -1,0 +1,28 @@
+name: napari-annotatorj
+schema_version: 0.1.0
+contributions:
+  commands:
+  - id: napari-annotatorj.AnnotatorJ
+    title: Create Annotator J
+    python_name: napari_annotatorj._dock_widget:AnnotatorJ
+  - id: napari-annotatorj.get_reader
+    title: Get Reader
+    python_name: napari_annotatorj._reader:napari_get_reader
+  - id: napari-annotatorj.write_labels
+    title: Write Labels
+    python_name: napari_annotatorj._writer:napari_write_labels
+  readers:
+  - command: napari-annotatorj.get_reader
+    filename_patterns:
+    - <EDIT_ME>
+    accepts_directories: true
+  writers:
+  - command: napari-annotatorj.write_labels
+    layer_types:
+    - labels
+    filename_extensions:
+    - .tiff
+    display_name: labels
+  widgets:
+  - command: napari-annotatorj.AnnotatorJ
+    display_name: Annotator J

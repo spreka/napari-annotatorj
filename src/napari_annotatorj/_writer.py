@@ -7,14 +7,12 @@ see: https://napari.org/docs/dev/plugins/hook_specifications.html
 Replace code below according to your needs
 """
 
-from napari_plugin_engine import napari_hook_implementation
 import skimage.io
 import numpy
 
 supported_layers = ['labels']
 
 
-@napari_hook_implementation
 def napari_get_writer(path, layer_types):
 	# Check that only supported layers have been passed
 	for x in set(layer_types):
@@ -28,7 +26,6 @@ def napari_get_writer(path, layer_types):
 	return napari_write_labels
 
 
-@napari_hook_implementation
 def napari_write_labels(path: str, data: numpy.ndarray, meta: dict):
 	if data is None:
 		return None

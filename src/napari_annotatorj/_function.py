@@ -10,20 +10,10 @@ from typing import TYPE_CHECKING
 
 from enum import Enum
 import numpy as np
-from napari_plugin_engine import napari_hook_implementation
 
 if TYPE_CHECKING:
     import napari
 
-
-# This is the actual plugin function, where we export our function
-# (The functions themselves are defined below)
-@napari_hook_implementation
-def napari_experimental_provide_function():
-    # we can return a single function
-    # or a tuple of (function, magicgui_options)
-    # or a list of multiple functions with or without options, as shown here:
-    return [threshold, image_arithmetic]
 
 
 # 1.  First example, a simple function that thresholds an image and creates a labels layer

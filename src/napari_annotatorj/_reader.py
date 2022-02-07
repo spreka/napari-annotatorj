@@ -10,14 +10,12 @@ Replace code below accordingly.  For complete documentation see:
 https://napari.org/docs/dev/plugins/for_plugin_developers.html
 """
 import numpy as np
-from napari_plugin_engine import napari_hook_implementation
 import os
 
 # supported image formats:
 exts=['.png','.bmp','.jpg','.jpeg','.tif','.tiff','.gif']
 
 
-@napari_hook_implementation
 def napari_get_reader(path):
     """A basic implementation of the napari_get_reader hook specification.
 

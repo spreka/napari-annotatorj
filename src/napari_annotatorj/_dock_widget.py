@@ -6,7 +6,6 @@ see: https://napari.org/docs/dev/plugins/hook_specifications.html
 
 Replace code below according to your needs.
 """
-from napari_plugin_engine import napari_hook_implementation
 from qtpy.QtWidgets import QWidget, QHBoxLayout,QVBoxLayout, QPushButton, QCheckBox,QLabel
 from magicgui import magic_factory
 
@@ -1181,9 +1180,3 @@ class BackupROI():
 # -------------------------------------
 # end of class BackupROI
 # -------------------------------------
-
-
-@napari_hook_implementation
-def napari_experimental_provide_dock_widget():
-    # you can return either a single widget, or a sequence of widgets
-    return AnnotatorJ

@@ -80,5 +80,6 @@ target/
 
 # testing
 demo/masks
+demo/masks_prev
 demo/img_ROIs_classes.zip
 masks
