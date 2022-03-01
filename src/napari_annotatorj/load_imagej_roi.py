@@ -8,7 +8,7 @@ from _dock_widget import AnnotatorJ
 viewer = napari.Viewer()
 pluginInstance=AnnotatorJ(viewer)
 pluginInstance.setTestMode(True)
-viewer.window.add_dock_widget(pluginInstance)
+viewer.window.add_dock_widget(pluginInstance,name='AnnotatorJ')
 pluginInstance.openNew()
 pluginInstance.loadROIs()
 napari.run()
