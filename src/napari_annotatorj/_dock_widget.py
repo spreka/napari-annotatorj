@@ -6,7 +6,7 @@ see: https://napari.org/docs/dev/plugins/hook_specifications.html
 
 Replace code below according to your needs.
 """
-from qtpy.QtWidgets import QWidget, QHBoxLayout,QVBoxLayout, QPushButton, QCheckBox,QLabel
+from qtpy.QtWidgets import QWidget, QHBoxLayout,QVBoxLayout, QPushButton, QCheckBox,QLabel,QMessageBox,QFileDialog
 from magicgui import magic_factory
 
 import os
@@ -14,8 +14,8 @@ import skimage.io
 from roifile import ImagejRoi,ROI_TYPE,roiwrite
 from napari.layers import Shapes, Image
 import numpy
-from qtpy.QtWidgets import QFileDialog
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt,QSize
+from qtpy.QtGui import QPixmap
 #from napari.layers.Shapes import mode
 from napari.layers.shapes import _shapes_key_bindings as key_bindings
 from napari.layers.shapes import _shapes_mouse_bindings as mouse_bindings
@@ -64,113 +64,209 @@ class AnnotatorJ(QWidget):
         self.brushSize=5
         self.imgSize=None
 
+        # logo files: annotatorj_logo_dark, annotatorj_logo_light, annotatorj_logo_red
+        self.logoFile='annotatorj_logo_dark'
+
+        self.closeingOnPurpuse=False
+        self.started=False
+        self.curFileList=None
+        self.curFileIdx=-1
+        self.stepping=False
+        self.enableMaskLoad=False
+        self.autoMaskLoad=False
+        self.maskFolderInited=False
+
+        self.inAssisting=False
+        self.addAuto=False
+        self.contAssist=False
+        self.classMode=False
+
+        self.imageFromArgs=False
+        self.finishedSaving=False
+        self.startedClassifying=False
+        self.loadedROI=False
+
+        # supported image formats
+        self.imageExsts=['.png','.bmp','.jpg','.jpeg','.tif','.tiff']
+
         # ---------------------------
         # add buttons and ui elements
         # ---------------------------
-        btnOpen = QPushButton('Open')
-        btnOpen.clicked.connect(self.openNew)
+        self.btnOpen = QPushButton('Open')
+        self.btnOpen.clicked.connect(self.openNew)
 
-        btnLoad = QPushButton('Load')
-        btnLoad.clicked.connect(self.loadROIs)
+        self.btnLoad = QPushButton('Load')
+        self.btnLoad.clicked.connect(self.loadROIs)
 
-        btnSave = QPushButton('Save')
-        btnSave.clicked.connect(self.saveROIs)
+        self.btnSave = QPushButton('Save')
+        self.btnSave.clicked.connect(self.saveData)
+
+        self.btnOverlay = QPushButton('Overlay')
+        #self.btnOverlay.clicked.connect(self.setOverlay)
 
         # quick export
-        btnExport = QPushButton('[^]')
-        btnExport.clicked.connect(self.quickExport)
+        self.btnExport = QPushButton('[^]')
+        self.btnExport.clicked.connect(self.quickExport)
+
+        # steppers
+        self.buttonPrev = QPushButton('<')
+        self.buttonPrev.clicked.connect(self.prevImage)
+        #self.buttonPrev.setEnabled(False)
+
+        self.buttonNext = QPushButton('>')
+        self.buttonNext.clicked.connect(self.nextImage)
+        #self.buttonNext.setEnabled(False)
+
+        # options
+        self.buttonOptions=QPushButton('...')
+        self.buttonOptions.setToolTip('Show options')
+        #self.buttonOptions.clicked.connect(self.)
+
+        self.btnColours=QPushButton('Colours')
+        self.btnColours.setToolTip('Set colour for annotations or overlay')
+        #self.btnColours.clicked.connect(self.)
 
         # checkboxes
         # edit mode
-        chkEdit = QCheckBox('Edit mode')
-        chkEdit.setChecked(False)
-        chkEdit.setToolTip('Allows switching to contour edit mode. Select with mouse click, accept with "q".')
-        chkEdit.stateChanged.connect(self.setEditMode)
+        self.chkEdit = QCheckBox('Edit mode')
+        self.chkEdit.setChecked(False)
+        self.chkEdit.setToolTip('Allows switching to contour edit mode. Select with mouse click, accept with "q".')
+        self.chkEdit.stateChanged.connect(self.setEditMode)
 
         # add auto mode
-        chkAuto = QCheckBox('Add automatically')
-        chkAuto.setChecked(True)
-        chkAuto.setEnabled(False)
-        chkAuto.setToolTip('Adds contours to annotations, always active (used in the ImageJ version)')
-        chkAuto.setStyleSheet("color: gray")
+        self.chckbxAddAutomatically = QCheckBox('Add automatically')
+        self.chckbxAddAutomatically.setChecked(True)
+        self.chckbxAddAutomatically.setEnabled(False)
+        self.chckbxAddAutomatically.setToolTip('Adds contours to annotations, always active (used in the ImageJ version)')
+        self.chckbxAddAutomatically.setStyleSheet("color: gray")
         # smooth mode
-        chkSmooth = QCheckBox('Smooth')
-        chkSmooth.setToolTip('Applies smoothing to contour')
-        chkSmooth.setChecked(False)
-        #chkSmooth.stateChanged.connect(self.setSmooth)
+        self.chkSmooth = QCheckBox('Smooth')
+        self.chkSmooth.setToolTip('Applies smoothing to contour')
+        self.chkSmooth.setChecked(False)
+        #self.chkSmooth.stateChanged.connect(self.setSmooth)
         # show contours
-        chkShowContours = QCheckBox('Show contours')
-        chkShowContours.setChecked(True)
-        chkShowContours.stateChanged.connect(self.showCnt)
+        self.chkShowContours = QCheckBox('Show contours')
+        self.chkShowContours.setChecked(True)
+        self.chkShowContours.stateChanged.connect(self.showCnt)
         # assist mode
-        chkAssist = QCheckBox('Contour assist')
-        chkAssist.setChecked(False)
-        #chkAssist.stateChanged.connect(self.setContourAssist)
+        self.chckbxContourAssist = QCheckBox('Contour assist')
+        self.chckbxContourAssist.setChecked(False)
+        #self.chckbxContourAssist.stateChanged.connect(self.setContourAssist)
         # show overlay
-        chkShowOverlay = QCheckBox('Show overlay')
-        chkShowOverlay.setChecked(False)
-        #chkShowOverlay.stateChanged.connect(self.showOverlay)
+        self.chkShowOverlay = QCheckBox('Show overlay')
+        self.chkShowOverlay.setChecked(False)
+        #self.chkShowOverlay.stateChanged.connect(self.showOverlay)
         # class mode
-        chkClass = QCheckBox('Class mode')
-        chkClass.setChecked(False)
-        #chkClass.stateChanged.connect(self.setClassMode)
+        self.chckbxClass = QCheckBox('Class mode')
+        self.chckbxClass.setChecked(False)
+        #self.chckbxClass.stateChanged.connect(self.setClassMode)
 
 
         # add labels
-        roiLabel=QLabel('ROIs')
-        nameLabel=QLabel('(1/1) [image name]')
+        self.roiLabel=QLabel('ROIs')
+        self.lblCurrentFile=QLabel('(1/1) [image name]')
+
+        self.logo=QLabel()
+        max_size=QSize(250,250)
+        pixmap=QPixmap('icon/'+self.logoFile+'.svg')
+        scaled=pixmap.scaled(max_size,Qt.KeepAspectRatio,Qt.SmoothTransformation)
+        self.logo.setPixmap(scaled)
+
+        bsize=int(self.btnOpen.size().width())
+        bsize2=70
+        labelsize=120
+
+        # set button sizes
+        self.btnOpen.setStyleSheet(f"max-width: {bsize2}px")
+        self.btnLoad.setStyleSheet(f"max-width: {bsize2}px")
+        self.btnSave.setStyleSheet(f"max-width: {bsize2}px")
+        self.btnExport.setStyleSheet(f"max-width: {bsize2}px")
+        self.btnOverlay.setStyleSheet(f"max-width: {bsize2}px")
+        self.buttonPrev.setStyleSheet(f"min-width: {int(bsize2/2)}px;")
+        self.buttonNext.setStyleSheet(f"min-width: {int(bsize2/2)}px;")
+        self.buttonOptions.setStyleSheet(f"max-width: {bsize2}px")
+        self.btnColours.setStyleSheet(f"max-width: {bsize2}px")
+        self.lblCurrentFile.setStyleSheet(f"width: {labelsize}px")
 
         # set layouts
-        mainVbox=QVBoxLayout()
-        hBoxTitle=QHBoxLayout()
-        hBoxUp=QHBoxLayout()
-        hBoxDown=QHBoxLayout()
-        vBoxLeft=QVBoxLayout()
-        hBoxRight=QHBoxLayout()
-        vBoxRightReal=QVBoxLayout()
-        vBoxRightDummy=QVBoxLayout()
+        self.mainVbox=QVBoxLayout()
+        self.hBoxLogo=QHBoxLayout()
+        self.hBoxTitle=QHBoxLayout()
+        self.hBoxUp=QHBoxLayout()
+        self.hBoxDown=QHBoxLayout()
+        self.hBoxDownInnerLeft=QHBoxLayout()
+        self.hBoxDownInnerRight=QHBoxLayout()
+        self.hBoxDownCont=QHBoxLayout()
+        self.vBoxDownCont=QVBoxLayout()
+        self.vBoxDown=QVBoxLayout()
+        self.vBoxLeft=QVBoxLayout()
+        self.hBoxRight=QHBoxLayout()
+        self.vBoxRightReal=QVBoxLayout()
+        self.vBoxRightDummy=QVBoxLayout()
 
-        hBoxTitle.addWidget(roiLabel)
+        self.hBoxLogo.addWidget(self.logo)
+        self.hBoxTitle.addWidget(self.roiLabel)
 
-        vBoxLeft.setAlignment(Qt.AlignTop)
-        vBoxLeft.addWidget(chkAuto)
-        vBoxLeft.addWidget(chkSmooth)
-        vBoxLeft.addWidget(chkShowContours)
-        vBoxLeft.addWidget(chkAssist)
-        vBoxLeft.addWidget(chkShowOverlay)
-        vBoxLeft.addWidget(chkEdit)
-        vBoxLeft.addWidget(chkClass)
+        self.hBoxLogo.setAlignment(Qt.AlignCenter)
+
+        self.vBoxLeft.setAlignment(Qt.AlignTop)
+        self.vBoxLeft.addWidget(self.chckbxAddAutomatically)
+        self.vBoxLeft.addWidget(self.chkSmooth)
+        self.vBoxLeft.addWidget(self.chkShowContours)
+        self.vBoxLeft.addWidget(self.chckbxContourAssist)
+        self.vBoxLeft.addWidget(self.chkShowOverlay)
+        self.vBoxLeft.addWidget(self.chkEdit)
+        self.vBoxLeft.addWidget(self.chckbxClass)
 
         # add dummy buttons as spacers
-        vBoxRightDummy.setAlignment(Qt.AlignTop)
-        vBoxRightDummy.addSpacing(54)
-        vBoxRightDummy.addWidget(btnExport)
+        self.vBoxRightDummy.setAlignment(Qt.AlignTop)
+        self.vBoxRightDummy.addSpacing(54)
+        self.vBoxRightDummy.addWidget(self.btnExport)
         
-        vBoxRightReal.setAlignment(Qt.AlignTop)
-        vBoxRightReal.addWidget(btnOpen)
-        vBoxRightReal.addWidget(btnLoad)
-        vBoxRightReal.addWidget(btnSave)
+        self.vBoxRightReal.setAlignment(Qt.AlignTop)
+        self.vBoxRightReal.addWidget(self.btnOpen)
+        self.vBoxRightReal.addWidget(self.btnLoad)
+        self.vBoxRightReal.addWidget(self.btnSave)
+        self.vBoxRightReal.addWidget(self.btnOverlay)
 
-        hBoxDown.addWidget(nameLabel)
+        self.hBoxDownInnerLeft.addWidget(self.lblCurrentFile)
+        self.hBoxDownInnerRight.addWidget(self.buttonPrev)
+        self.hBoxDownInnerRight.addWidget(self.buttonNext)
+        self.hBoxDownInnerLeft.setAlignment(Qt.AlignLeft)
+        self.hBoxDownInnerRight.setAlignment(Qt.AlignRight)
+        self.hBoxDown.addLayout(self.hBoxDownInnerLeft)
+        self.hBoxDown.addSpacing(3)
+        self.hBoxDown.addLayout(self.hBoxDownInnerRight)
 
-        hBoxRight.addLayout(vBoxRightDummy)
-        hBoxRight.addLayout(vBoxRightReal)
+        self.vBoxDown.addWidget(self.buttonOptions)
+        self.vBoxDown.addWidget(self.btnColours)
+        self.vBoxDownCont.setAlignment(Qt.AlignBottom)
+        self.vBoxDownCont.addLayout(self.hBoxDown)
 
-        hBoxUp.addLayout(vBoxLeft)
-        hBoxUp.addLayout(hBoxRight)
-        mainVbox.addLayout(hBoxTitle)
-        mainVbox.addLayout(hBoxUp)
-        mainVbox.addLayout(hBoxDown)
+        self.hBoxDownCont.setAlignment(Qt.AlignBottom)
+        self.hBoxDownCont.addLayout(self.vBoxDownCont)
+        self.hBoxDownCont.addLayout(self.vBoxDown)
 
-        self.setLayout(mainVbox)
+        self.hBoxRight.addLayout(self.vBoxRightDummy)
+        self.hBoxRight.addLayout(self.vBoxRightReal)
+
+        self.hBoxUp.addLayout(self.vBoxLeft)
+        self.hBoxUp.addLayout(self.hBoxRight)
+        self.mainVbox.addLayout(self.hBoxLogo)
+        self.mainVbox.addLayout(self.hBoxTitle)
+        self.mainVbox.addLayout(self.hBoxUp)
+        #self.mainVbox.addLayout(self.hBoxDown)
+        self.mainVbox.addLayout(self.hBoxDownCont)
+
+        self.setLayout(self.mainVbox)
 
         '''
         self.setLayout(QHBoxLayout())
-        self.layout().addWidget(btnOpen)
-        self.layout().addWidget(btnLoad)
-        self.layout().addWidget(btnSave)
-        self.layout().addWidget(btnExport)
-        self.layout().addWidget(chkEdit)
+        self.layout().addWidget(self.btnOpen)
+        self.layout().addWidget(self.btnLoad)
+        self.layout().addWidget(self.btnSave)
+        self.layout().addWidget(self.btnExport)
+        self.layout().addWidget(self.chkEdit)
         '''
 
         # greeting
@@ -190,27 +286,97 @@ class AnnotatorJ(QWidget):
                 print('Test image could not be found')
         else:
             # browse an original image
-            # TODO
-            destNameRaw,_=QFileDialog.getOpenFileName(
-                self,"Select an image",
-                str(os.path.join(self.defDir,self.defFile)),"Images (*.png *.bmp *.jpg *.jpeg *.tif *.tiff *.gif)")
-            print(destNameRaw)
-            if os.path.exists(destNameRaw):
-                self.defDir=os.path.dirname(destNameRaw)
-                self.defFile=os.path.basename(destNameRaw)
-                img=skimage.io.imread(destNameRaw)
-                print('Opened file: {}'.format(destNameRaw))
-            else:
-                print('Could not open file: {}'.format(destNameRaw))
-                return
+
+            # closing & saving previous annotations moved to separate fcn
+            self.closeWindowsAndSave()
+
+            # TODO: add checkbox checks
+
+            # check edit mode setting
+            if self.editMode:
+                self.addAuto=False
+                self.chckbxAddAutomatically.setEnabled(False)
+                print('< edit mode is active')
+                self.contAssist=False
+                self.chckbxContourAssist.setEnabled(False)
+
+                self.classMode=False
+                self.chckbxClass.setEnabled(False)
+
+
+            if not self.imageFromArgs:
+                if self.stepping:
+                    # concatenate file path with set new prev/next image name and open it without showing the dialog
+                    destNameRaw=os.path.join(self.defDir,self.defFile)
+                    self.stepping=False
+                else:
+                    destNameRaw,_=QFileDialog.getOpenFileName(
+                        self,"Select an image",
+                        str(os.path.join(self.defDir,self.defFile)),"Images (*.png *.bmp *.jpg *.jpeg *.tif *.tiff *.gif)")
+
+                print(destNameRaw)
+                if os.path.exists(destNameRaw):
+                    self.defDir=os.path.dirname(destNameRaw)
+                    self.defFile=os.path.basename(destNameRaw)
+                    img=skimage.io.imread(destNameRaw)
+                    print('Opened file: {}'.format(destNameRaw))
+                else:
+                    print('Could not open file: {}'.format(destNameRaw))
+                    return
 
         imageLayer = self.viewer.add_image(img,name='Image')
 
         # check if a shapes layer already exists for the rois
         # if so, bring it forward
-        self.findROIlayer(True)
+        roiLayer=self.findROIlayer(True)
+        if roiLayer is None:
+            # create new ROI layer if none present
+            self.initRoiManager()
         self.viewer.reset_view()
 
+        self.curFileList=[f for f in os.listdir(self.defDir) if os.path.isfile(os.path.join(self.defDir,f)) and os.path.splitext(f)[1] in self.imageExsts]
+        fileListCount=len(self.curFileList)
+
+        # find current file in the list
+        try:
+            self.curFileIdx=self.curFileList.index(self.defFile)
+        except ValueError:
+            print('Could not find the currently selected file name in the list of image files')
+
+
+        # update file name tag on main window to check which image we are annotating
+        displayedName=self.defFile
+        maxLength=13 #13
+        # check how long the file name is (if it can be displayed)
+        nameLength=len(self.defFile)
+        if nameLength>maxLength:
+            nameSplit=os.path.splitext(self.defFile)
+            displayedName=self.defFile[:min(maxLength-3,len(nameSplit[0]))]+'..'+nameSplit[1]
+        
+        self.lblCurrentFile.setText(' ('+str(self.curFileIdx+1)+'/'+str(fileListCount)+'): '+displayedName)
+
+        # MOVING FCN mods:
+        #self.lblCurrentFile.addMouseListener
+
+        # inactivate prev/next buttons if needed
+        if self.curFileIdx==0:
+            # first image in folder, inactivate prev:
+            self.buttonPrev.setEnabled(False)
+        else:
+            self.buttonPrev.setEnabled(True)
+
+        if self.curFileIdx==len(self.curFileList)-1:
+            # last image, inactivate next:
+            self.buttonNext.setEnabled(False)
+        else:
+            self.buttonNext.setEnabled(True)
+
+
+        # TODO: add missing settings
+
+
+        # when open function finishes:
+        self.started=True
 
 
     def loadROIs(self):
@@ -225,34 +391,77 @@ class AnnotatorJ(QWidget):
         else:
             # browse an ImageJ ROI zip file
             # TODO
-            roiFileName,_=QFileDialog.getOpenFileName(
-                self,"Select an annotation (ROI) .zip file",
-                str(os.path.join(self.defDir,self.defFile)),"Archives (*.zip)")
-            print(roiFileName)
-            if os.path.exists(roiFileName):
-                loadedROIfolder=os.path.dirname(roiFileName)
-                loadedROIname=os.path.basename(roiFileName)
-                rois=ImagejRoi.fromfile(roiFileName)
-                print('Opened ROI: {}'.format(roiFileName))
-            else:
-                print('Failed to open ROI .zip file: {}'.format(roiFileName))
+            if not self.started or (self.findImageLayer() is None or self.findImageLayer().data is None):
+                warnings.warn('Open an image and annotate it first')
                 return
 
-        #self.add2RoiManager(rois)
-        shapesLayer=self.extractROIdata(rois)
-        self.viewer.add_layer(shapesLayer)
-        self.findROIlayer(True)
-        print('Loaded {} ROIs successfully'.format(len(rois)))
+            # check if we have annotations in the list before loading anything to it
+            roiLayer=self.findROIlayer()
+            curROInum=len(roiLayer.data) if roiLayer is not None else 0
+            print('Before loading we had '+str(curROInum)+' contours');
+            prevROIcount=curROInum
+            if self.loadedROI:
+                # currently the loaded rois are appended to the current roi list
+                # TODO: ask if those should be deleted first
+                pass
 
-        # select the "select shape" mode from the controls by default
-        #shapesLayer.mode = 'select'
-        # select the "add polygon" mode from the controls by default to enable freehand ROI drawing
-        shapesLayer.mode = 'add_polygon'
+            # check if masks can be loaded (false by default)
+            if self.enableMaskLoad:
+                # TODO
+                pass
 
-        self.addFreeROIdrawing(shapesLayer)
-        self.addKeyBindings(shapesLayer)
+            else:
+                # normal way, import ROI.zip file
+                roiFileName,_=QFileDialog.getOpenFileName(
+                    self,"Select an annotation (ROI) .zip file",
+                    str(os.path.join(self.defDir,self.defFile)),"Archives (*.zip)")
+                print(roiFileName)
+                if os.path.exists(roiFileName):
+                    loadedROIfolder=os.path.dirname(roiFileName)
+                    loadedROIname=os.path.basename(roiFileName)
+                    rois=ImagejRoi.fromfile(roiFileName)
+                    print('Opened ROI: {}'.format(roiFileName))
+                else:
+                    print('Failed to open ROI .zip file: {}'.format(roiFileName))
+                    return
 
-        self.viewer.reset_view()
+
+                #self.add2RoiManager(rois)
+                shapesLayer=self.extractROIdata(rois)
+                self.viewer.add_layer(shapesLayer)
+                self.findROIlayer(True)
+                print('Loaded {} ROIs successfully'.format(len(rois)))
+
+                # select the "select shape" mode from the controls by default
+                #shapesLayer.mode = 'select'
+                # select the "add polygon" mode from the controls by default to enable freehand ROI drawing
+                shapesLayer.mode = 'add_polygon'
+
+                self.addFreeROIdrawing(shapesLayer)
+                self.addKeyBindings(shapesLayer)
+
+                self.viewer.reset_view()
+
+            self.loadedROI=True
+            roiLayer=self.findROIlayer()
+            curROInum=len(roiLayer.data)
+            print('After loading we have '+str(curROInum)+' contours');
+
+            # rename the loaded contours if there were previous contours added
+            # TODO
+
+            # check if the rois have class info saved
+            isClassified=False
+            for idx,r in enumerate(roiLayer.data):
+                if roiLayer.properties['class'][idx]>0:
+                    isClassified=True
+                    break
+
+            if isClassified:
+                # set class vars accordingly
+                # TODO: set the vars
+                self.startedClassifying=True
+
 
     def loadROIs2(self):
         # temporarily load a test ImageJ ROI.zip file with contours created in ImageJ and saved with AnnotatorJ
@@ -617,13 +826,54 @@ class AnnotatorJ(QWidget):
     def setTestMode(self,mode=False):
         self.testMode=mode
 
-    def saveROIs(self):
+    def saveData(self):
         # open a save dialog and save the rois to an imagej compatible roi.zip file
+        self.finishedSaving=False
+        if not self.started or (self.findImageLayer() is None or self.findImageLayer().data is None):
+            warnings.warn('Open an image and annotate it first')
+            if self.stepping:
+                self.finishedSaving=True
+            return
+
         print('saving...')
+        if self.stepping:
+            self.finishedSaving=False
+
         # TODO: rename rois
 
+        if not self.imageFromArgs: # || origMaskFileNames==null || !roisFromArgs
+
+            if self.startedClassifying:
+                # see if any object was actually classified
+                isClassified=False
+                roiLayer=self.findROIlayer()
+                for idx,r in enumerate(roiLayer.data):
+                    if roiLayer.properties['class'][idx]>0:
+                        isClassified=True
+                        break
+
+                if isClassified:
+                    # no need for class selection dialog box
+                    selectedClass='masks'
+
+                else:
+
+                    # ask class name in dialog box
+                    # TODO
+                    selectedClass='masks'
+            else:
+                # create new frame for optional extra element adding manually by the user (for new custom class):
+                # TODO
+                pass
+
+            
+        else:
+            # roi stack was imported, save to mask names
+            # TODO: do this branch
+            pass
+
+
         # set output folder and create it
-        selectedClass='masks'
         destMaskFolder2=os.path.join(self.defDir,selectedClass)
         os.makedirs(destMaskFolder2,exist_ok=True)
         print('Created output folder: {}'.format(destMaskFolder2))
@@ -1068,7 +1318,7 @@ class AnnotatorJ(QWidget):
 
     def quickExport(self):
         # save the ImageJ ROI files as when pressing the "Save" button
-        self.saveROIs()
+        self.saveData()
 
         # construct mask file name
         # set output folder and create it
@@ -1115,6 +1365,184 @@ class AnnotatorJ(QWidget):
 
         # bring the ROI layer forward
         self.viewer.layers.selection.add(roiLayer)
+
+
+    def closeActiveWindows(self):
+        doClose=False
+        # ask for confirmation
+        response=QMessageBox.question(self, 'Save before quit', 'Do you want to save current contours?\nThis will overwrite any previously\nsaved annotation for this image.',QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel, QMessageBox.Yes)
+        if response==QMessageBox.No:
+            # just quit
+            print('No button clicked (Save before quit)')
+            doClose=True
+            return doClose
+
+        elif response==QMessageBox.Yes:
+            print('Yes button clicked (Save before quit)')
+            # save rois first
+            if self.started:
+                print('  started')
+            else:
+                print('  ! started')
+
+            roiLayer=self.findROIlayer()
+            if roiLayer is not None:
+                print('  roiLayer is not None')
+            else:
+                print('  roiLayer = None')
+            
+
+            if self.started and roiLayer is not None:
+                #self.imp=self.findImageLayer().data
+                if len(roiLayer.data)!=0:
+                    print('  >> starting save...')
+                    # save using a separate fcn instead:
+                    self.saveData()
+                    
+                    print('in close confirm after save finished')
+            elif self.selectedAnnotationType.equals('semantic'):
+                #self.imp=self.findImageLayer().data
+                print('  >> starting semantic save...')
+                self.saveData()
+                print('in close confirm after save finished')
+            
+            doClose=True
+            
+        elif response == QMessageBox.Cancel:
+            # do nothing
+            print("Cancel button clicked (Save before quit)")
+            doClose=False
+            return doClose
+
+        elif response == QMessageBox.Close:
+            # do nothing
+            print("Closed close confirm (Save before quit)")
+            doClose=False
+            return doClose
+
+        return doClose
+    
+
+    def closeWindowsAndSave(self):
+        if self.started:
+            # check if there are rois added:
+            # see if the roi layer is empty
+            roiLayer=self.findROIlayer()
+            if (roiLayer is not None and len(roiLayer.data)>0): # or (selectedAnnotationType=='semantic' and imp is not None and imp.getOverlay is not None)
+                # offer to save current roi set
+                contClosing=self.closeActiveWindows()
+
+                if self.stepping:
+                    if not self.finishedSaving: #!contClosing || !finishedSaving
+                        # wait
+                        print('Not done yet')
+                        #return;
+
+                if contClosing:
+                    # close roimanager
+                    if roiLayer is not None:
+                        # delete the ROI layer
+                        self.viewer.layers.remove(roiLayer)
+                        self.manager=None
+
+                    self.inAssisting=False
+                    self.startedEditing=False
+                    self.origEditedROI=None
+                    #if editManager is not None:
+                    #    editManager.reset()
+
+
+            # check if image was passed as input argument
+            if not self.imageFromArgs:
+                # close image too if open
+                imageLayer=self.findImageLayer()
+                while imageLayer is not None:
+                    self.viewer.layers.remove(imageLayer)
+                    imageLayer=self.findImageLayer()
+
+            # clear the log window
+            # there is no log window in napari
+            
+
+
+    def prevImage(self):
+        print('Function not implemented yet')
+        pass
+
+        self.closeingOnPurpuse=True
+        if not self.started:
+            warnings.warn('Use Open to select an image in a folder first')
+            return
+
+        # check if there is a list of images and if we can have a previous image
+        if self.curFileList is not None and len(self.curFileList)>1:
+            # more than 1 images in the list
+            if self.curFileIdx>0:
+                # current image is not the first, we can go back
+                self.stepping=True
+
+                # save current annotation first
+                # this is done in openNew() fcn
+
+                # open previous image with Open fcn:
+                # set image name:
+                self.curFileIdx-=1
+                self.defFile=self.curFileList[self.curFileIdx]
+                self.openNew()
+                #self.imp=self.findImageLayer().data
+
+                # check if auto mask load is enabled
+                if self.enableMaskLoad and self.autoMaskLoad and self.maskFolderInited:
+                    # load the mask from the selected folder automatically
+                    self.loadROIs()
+
+                return
+
+
+        # this should not happen due to button inactivation, but handle it anyway:
+        # if we get here there is no previous image to open, show message
+        warnings.warn('There is no previous image in the current folder')
+        return
+
+
+    def nextImage(self):
+        print('Function not implemented yet')
+        pass
+
+        self.closeingOnPurpuse=True
+        if not self.started:
+            warnings.warn('Use Open to select an image in a folder first')
+            return
+
+        # check if there is a list of images and if we can have a previous image
+        if self.curFileList is not None and len(self.curFileList)>1:
+            # more than 1 images in the list
+            if self.curFileIdx<len(self.curFileList)-1:
+                # current image is not the last, we can go forward
+                self.stepping=True
+
+                # save current annotation first
+                # this is done in openNew() fcn
+
+                # open next image with Open fcn:
+                # set image name:
+                self.curFileIdx+=1
+                self.defFile=self.curFileList[self.curFileIdx]
+                self.openNew()
+                #self.imp=self.findImageLayer().data
+
+                # check if auto mask load is enabled
+                if self.enableMaskLoad and self.autoMaskLoad and self.maskFolderInited:
+                    # load the mask from the selected folder automatically
+                    self.loadROIs()
+
+                return
+
+
+        # this should not happen due to button inactivation, but handle it anyway:
+        # if we get here there is no previous image to open, show message
+        warnings.warn('There is no previous image in the current folder')
+        return
 
 
     def setEditMode(self,state):
