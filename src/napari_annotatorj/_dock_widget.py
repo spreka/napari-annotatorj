@@ -6,7 +6,7 @@ see: https://napari.org/docs/dev/plugins/hook_specifications.html
 
 Replace code below according to your needs.
 """
-from qtpy.QtWidgets import QWidget, QHBoxLayout,QVBoxLayout, QPushButton, QCheckBox,QLabel,QMessageBox,QFileDialog
+from qtpy.QtWidgets import QWidget, QHBoxLayout,QVBoxLayout, QPushButton, QCheckBox,QLabel,QMessageBox,QFileDialog,QDialog
 from magicgui import magic_factory
 
 import os
@@ -14,7 +14,7 @@ import skimage.io
 from roifile import ImagejRoi,ROI_TYPE,roiwrite
 from napari.layers import Shapes, Image
 import numpy
-from qtpy.QtCore import Qt,QSize
+from qtpy.QtCore import Qt,QSize,QRect
 from qtpy.QtGui import QPixmap
 #from napari.layers.Shapes import mode
 from napari.layers.shapes import _shapes_key_bindings as key_bindings
@@ -23,6 +23,8 @@ from napari.layers.labels import _labels_mouse_bindings as labels_mouse_bindings
 import warnings
 from cv2 import cv2
 from copy import deepcopy
+#from napari.qt import create_worker #thread_worker
+from napari.qt.threading import thread_worker #create_worker
 
 
 class AnnotatorJ(QWidget):
@@ -85,6 +87,31 @@ class AnnotatorJ(QWidget):
         self.finishedSaving=False
         self.startedClassifying=False
         self.loadedROI=False
+
+        self.trainedUNetModel=None
+        self.modelJsonFile='model_real'
+        self.modelWeightsFile='model_real_weights.h5'
+        self.modelFullFile='model_real.hdf5'
+        self.modelFolder=os.path.join(os.path.dirname(__file__),'models')
+        self.selectedCorrMethod=0 # U-Net
+        self.invertedROI=None
+        self.curPredictionImage=None
+        self.curPredictionImageName=None
+        self.curOrigImage=None
+        self.gpuSetting='0'
+
+        # default options for contour assist and semantic annotation
+        # can be overwritten in config file
+        # threshold of intensity difference for contour assisting region growing
+        self.intensityThreshVal=0.1 #0.1
+        self.intensityThreshValR=0.2
+        self.intensityThreshValG=0.4
+        self.intensityThreshValB=0.2
+        # threshold of distance in pixels from the existing contour in assisting region growing
+        self.distanceThreshVal=17
+        # brush sizes
+        self.correctionBrushSize=10
+        self.semanticBrushSize=50
 
         # supported image formats
         self.imageExsts=['.png','.bmp','.jpg','.jpeg','.tif','.tiff']
@@ -151,7 +178,8 @@ class AnnotatorJ(QWidget):
         # assist mode
         self.chckbxContourAssist = QCheckBox('Contour assist')
         self.chckbxContourAssist.setChecked(False)
-        #self.chckbxContourAssist.stateChanged.connect(self.setContourAssist)
+        self.chckbxContourAssist.setToolTip('Helps fit contour to object boundaries. Press \"q\" to add contour after correction. Press Ctrl+\"delete\" to delete suggested contour. (You must press either before you could continue!)')
+        self.chckbxContourAssist.stateChanged.connect(self.setContourAssist)
         # show overlay
         self.chkShowOverlay = QCheckBox('Show overlay')
         self.chkShowOverlay.setChecked(False)
@@ -168,7 +196,7 @@ class AnnotatorJ(QWidget):
 
         self.logo=QLabel()
         max_size=QSize(250,250)
-        pixmap=QPixmap('icon/'+self.logoFile+'.svg')
+        pixmap=QPixmap(os.path.join(os.path.dirname(__file__),'icon',self.logoFile+'.svg'))
         scaled=pixmap.scaled(max_size,Qt.KeepAspectRatio,Qt.SmoothTransformation)
         self.logo.setPixmap(scaled)
 
@@ -273,6 +301,8 @@ class AnnotatorJ(QWidget):
         #print('AnnotatorJ plugin is started | Happy annotations!')
         print('----------------------------\nAnnotatorJ plugin is started\nHappy annotations!\n----------------------------')
 
+        self.startUnet()
+
     def openNew(self):
         # temporarily open a test image
         # later this will start a browser dialog to select the input image file
@@ -291,6 +321,16 @@ class AnnotatorJ(QWidget):
             self.closeWindowsAndSave()
 
             # TODO: add checkbox checks
+
+            # check contour assist setting
+            if self.contAssist:
+                self.addAuto=False
+                self.chckbxAddAutomatically.setEnabled(False)
+                print('< contour assist mode is active')
+                self.editMode=False
+
+                self.classMode=False
+                self.chckbxClass.setEnabled(False)
 
             # check edit mode setting
             if self.editMode:
@@ -752,6 +792,19 @@ class AnnotatorJ(QWidget):
         print('Could not find the Image layer')
 
 
+    def findImageLayerName(self,echo=True,layerName='Image'):
+        for x in reversed(self.viewer.layers):
+            if (x.__class__ is Image and x.name==layerName):
+                if echo:
+                    print('{} is the uppermost image layer'.format(x.name))
+                # return it
+                return x
+            else:
+                pass
+        # log if the Image layer could not be found
+        print('Could not find the Image layer')
+
+
     def addROIdata(self,layer,rois):
         roiType='polygon' # default to this
         defColour='white'
@@ -864,12 +917,14 @@ class AnnotatorJ(QWidget):
             else:
                 # create new frame for optional extra element adding manually by the user (for new custom class):
                 # TODO
+                selectedClass='masks'
                 pass
 
             
         else:
             # roi stack was imported, save to mask names
             # TODO: do this branch
+            selectedClass='masks'
             pass
 
 
@@ -945,6 +1000,18 @@ class AnnotatorJ(QWidget):
                 # add a listener to mouse drags in polygon adding mode to mimic freehand roi drawing
                 @x.mouse_drag_callbacks.append
         '''
+
+
+    def addFreeROIdrawingCA(self,shapesLayer=None):
+        if shapesLayer is not None:
+            #shapesLayer.events.data.connect(self.contAssistROI,position='last')
+            shapesLayer.mouse_drag_callbacks.append(self.freeHandROI)
+            shapesLayer.mouse_drag_callbacks.append(self.editROI)
+        else:
+            return
+        return
+
+
     def freeHandROI(self,layer, event):
         #data_coordinates = layer.world_to_data(event.position)
         #cords = numpy.round(data_coordinates).astype(int)
@@ -965,11 +1032,16 @@ class AnnotatorJ(QWidget):
             # on release
             if dragged:
                 # drag ended
+                # add closing position:
+                coords = list(layer.world_to_data(event.position))
+                freeCoords.append(coords)
                 # mimic an 'esc' key press to quit the basic add_polygon method
                 key_bindings.finish_drawing_shape(layer)
                 print(freeCoords)
                 # add the coords as a new shape
                 layer.add(data=freeCoords,shape_type='polygon',edge_width=0.5,edge_color=defColour,face_color=[0,0,0,0])
+                if self.contAssist and not self.inAssisting:
+                    self.contAssistROI()
             # else: do nothing
             #    print('clicked!')
         # else: do nothing
@@ -1282,8 +1354,254 @@ class AnnotatorJ(QWidget):
             yield
 
 
-    def updateNewROIprops(self,event):
+    def acceptContAssist(self,labelLayer):
+        if not self.inAssisting:
+            print('Cannot accept suggested contour when not \'inAssisting\'')
+            return
+        yield
+
+        print('Q pressed - adding suggested contour')
+        # convert the edited shape on the temp labels layer to shape
+        mask=labelLayer.data
+        contour,hierarchy=cv2.findContours(mask.astype(numpy.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        if contour:
+            # not empty
+            if len(contour)>1:
+                # fill holes to create 1 object
+                if self.imgSize is not None:
+                    from scipy.ndimage import binary_fill_holes
+                    filled=numpy.zeros((self.imgSize[0],self.imgSize[1]),dtype=numpy.uint8)
+                    binary_fill_holes(mask,output=filled)
+                    contour,hierarchy=cv2.findContours(filled.astype(numpy.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                    if not (contour and len(contour)==1):
+                        msg='Cannot create roi from this label'
+                        warnings.warn(msg)
+                        return None
+                else:
+                    msg='Cannot create roi from this label'
+                    warnings.warn(msg)
+                    return None
+
+            shape=numpy.array(numpy.fliplr(numpy.squeeze(contour)))
+            roiLayer=self.findROIlayer()
+            roiLayer.add_polygons(shape)
+            roiLayer.refresh()
+            print('Added ROI ('+str(len(roiLayer.data))+'.) - assist mode')
+
+            # store updated brush size
+            self.brushSize=labelLayer.brush_size
+
+            # clear everything
+            self.cleanUpAfterContAssist(labelLayer,roiLayer)
+
+            return shape
+        else:
+            # no contour found
+            print('Could not find the contour after editing suggested contour')
+            return None
+
+
+    def deleteContAssist(self,labelLayer):
+        if not self.inAssisting:
+            print('Cannot delete suggested contour when not \'inAssisting\'')
+            return
+        yield
+
+        print('Ctrl+delete pressed - deleting suggested contour')
+
         roiLayer=self.findROIlayer()
+
+        # store updated brush size
+        self.brushSize=labelLayer.brush_size
+
+        # clear everything
+        self.cleanUpAfterContAssist(labelLayer,roiLayer)
+
+
+    def cleanUpAfterContAssist(self,labelLayer,roiLayer):
+        # reset vars
+        self.inAssisting=False
+        self.invertedROI=None
+        self.ROIpositionX=0
+        self.ROIpositionY=0
+        self.acObjects=None
+        self.startedEditing=False
+        self.origEditedROI=None
+
+        # delete this label layer
+        self.viewer.layers.remove(labelLayer)
+
+        if roiLayer.selected_data:
+            roiLayer.selected_data.pop()
+        roiLayer.mode='add_polygon'
+
+        contAssistLayer=self.addContAssistLayer()
+        self.addFreeROIdrawingCA(contAssistLayer)
+        contAssistLayer.mode='add_polygon'
+
+        # bring the ROI layer forward
+        self.viewer.layers.selection.add(contAssistLayer)
+
+
+    def contAssistROI(self):
+        # only do something when in contour assist mode
+        if not self.contAssist:
+            print('Contour assist not selected, cannot proceed')
+            return
+
+        roiLayer=self.findROIlayer(layerName='contourAssist')
+        if roiLayer is None:
+            print('No ROI layer found for contour assist (contourAssist)')
+            return
+
+        if roiLayer.mode=='select' and not self.inAssisting:
+            msg='Cannot start contour assist when {} is selected. Please select {}'.format(
+                '\'Select shapes(5)\'','\'Add polygons(P)\'')
+            warnings.warn(msg)
+            return
+        elif roiLayer.mode!='add_polygon' and not self.inAssisting:
+            msg='Cannot start contour assist. Please select {}'.format('\'Add polygons(P)\'')
+            warnings.warn(msg)
+            return
+        elif self.inAssisting:
+            # do nothing on mouse release
+            print('---- already inAssisting ----')
+            return
+
+        #yield
+
+        print('Suggesting improved contour...')
+
+        # get the image size
+        imageLayer=self.findImageLayer(echo=False)
+        if imageLayer is None:
+            print('No image layer found')
+            return
+        elif imageLayer.data is None:
+            print('No image opened')
+            return
+        s=imageLayer.data.shape
+        self.imgSize=s
+        
+
+        # get current selection as init contour
+        curROI=roiLayer.data[-1] if len(roiLayer.data)>0 else None
+        if curROI is None:
+            print('Empty ROI')
+        else:
+            print('curROI:')
+            print(curROI)
+        
+            # can start suggestions
+
+            # first start freehand selection tool for drawing --> done
+                # on mouse release start contour correction -->
+
+            # contour correction
+            newROI=None
+            
+            # setting unet model paths
+            modelJsonFile=os.path.join(self.modelFolder,self.modelJsonFile) #"model_real.json"
+            modelWeightsFile=os.path.join(self.modelFolder,self.modelWeightsFile) #"model_real_weights.h5"
+            modelFullFile=os.path.join(self.modelFolder,self.modelFullFile) #"model_real.hdf5"
+            try:
+                if self.selectedCorrMethod==0:
+                    # unet correction
+                    # debug:
+                    #print('  >> unet correction')
+                    jsonFileName=None
+                    modelFileName=None
+                    if os.path.isfile(modelWeightsFile):
+                        jsonFileName=modelJsonFile
+                        modelFileName=modelWeightsFile
+                    else:
+                        jsonFileName=None
+                        if os.path.isfile(modelFullFile):
+                            modelFileName=modelFullFile
+                        else:
+                            # model doesn't exist in the located folder
+                            print('Cannot find model in Contour assist init')
+                        
+                    # prepare the ROI as a cv2 contour
+                    labels=roiLayer.to_labels([s[0], s[1]]) # was labels
+                    # convert to labels layer
+                    #labelLayer = self.viewer.add_labels(labels, name='tmp')
+                    #curROIdata=labelLayer.data
+                    #self.viewer.layers.remove(labelLayer)
+                    curROIdata,hierarchy=cv2.findContours(labels.astype(numpy.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                    # delete temp init roi
+                    roiLayer.data=[]
+                    newROI=self.contourAssistUNet(imageLayer.data,curROI,curROIdata[0],self.intensityThreshVal,self.distanceThreshVal,jsonFileName,modelFileName)
+                elif self.selectedCorrMethod==1:
+                    # region growing
+                    # debug:
+                    #print('  >> classical correction')
+                    newROI=self.contourAssist(imageLayer.data,curROI,self.intensityThreshVal,self.distanceThreshVal)
+                
+            except Exception as ex:
+                print(ex)
+                self.invertedROI=None
+                raise(ex)
+            
+            if newROI is None:
+                # failed, return
+                print('Failed suggesting a better contour')
+                self.invertedROI=None
+            else:
+                # display this contour
+                roiLayer.add_polygons(newROI)
+
+                # succeeded, nothing else to do
+                print('Showing suggested contour')
+
+                # user can check it visually -->
+                        # set brush selection tool for contour modification -->
+
+                labels = roiLayer.to_labels([s[0], s[1]])
+                # delete this temp shape layer
+                self.viewer.layers.remove(roiLayer)
+                #roiLayer.visible=False
+                # convert to labels layer
+                labelLayer = self.viewer.add_labels(labels, name='editing')
+
+                #roiLayer.visible=True
+
+
+                # set the tool for an editing-capable one
+                #roiLayer.mode='add_polygon';
+                labelLayer.mode='paint'
+                labelLayer.brush_size=self.brushSize
+                labelLayer.opacity=0.5
+
+                # TODO: add callbacks like in editmode
+                # add a modifier to the paint tool to erase when 'alt' is held
+                labelLayer.mouse_drag_callbacks.insert(0,self.eraseBrush2)
+
+                # bind the shortcut 'q' to acceptEdit function
+                # 'ctrl+q' is by default bound to exit, so no ctrl here
+                labelLayer.bind_key('q',func=self.acceptContAssist)
+                labelLayer.bind_key('Control-Delete',func=self.deleteContAssist)
+                
+
+                # detect pressing "q" when they add the new contour -->
+                # TODO
+                if not self.inAssisting:
+                    self.inAssisting=True
+
+                    # wait for keypress
+
+                    # after key press:
+                    # moved to key listener fcn
+
+                else:
+                    # do nothing
+                    pass
+
+
+
+    def updateNewROIprops(self,event):
+        curROIlayerName='ROI' # if not self.contAssist else 'contourAssist'
+        roiLayer=self.findROIlayer(layerName=curROIlayerName)
         #debug:
         print(f'---- {len(roiLayer.data)} rois on layer ----')
         print(f'---- {self.roiCount} rois in manager ----')
@@ -1545,6 +1863,518 @@ class AnnotatorJ(QWidget):
         return
 
 
+
+    @thread_worker(start_thread=False)
+    def startUnetLoading(self):
+        importMode=None
+        if self.modelFolder is None:
+            print(f'Model folder not set, please set it to the folder containing the model {self.modelJsonFile} [.json and _weights.h5, or .hdf5]')
+            return None
+        if self.modelJsonFile is None:
+            print(f'Model file [.json and _weights.h5, or .hdf5] not set, please set it')
+            return None
+        else:
+            if os.path.isfile(os.path.join(self.modelFolder,self.modelJsonFile+'.json')) and os.path.isfile(os.path.join(self.modelFolder,self.modelJsonFile+'_weights.h5')):
+                print('  >> importing from json config + weights .h5 files...')
+                importMode=0
+            elif os.path.isfile(os.path.join(self.modelFolder,self.modelJsonFile+'.hdf5')):
+                print('  >> importing from a single .hdf5 file...')
+                importMode=1
+            else:
+                print(f'Model file {self.modelJsonFile} [.json and _weights.h5, or .hdf5] does not exist')
+                return None
+        #from .predict_unet import callPredictUnet,callPredictUnetLoaded,loadUnetModel
+        from .predict_unet import loadUnetModel
+        model=loadUnetModel(os.path.join(self.modelFolder,self.modelJsonFile),importMode=importMode)
+        print('  >> importing done...')
+        print('  >> no exception in loading the model...')
+        return model
+
+
+    def setUnetModel(self,model):
+        if model is not None:
+            self.trainedUNetModel=model
+            print('Successfully loaded pretrained U-Net model for contour correction')
+        else:
+            print('>>>> Failed, model is None')
+
+
+    def startUnet(self):
+        #from .predict_unet import callPredictUnet,callPredictUnetLoaded#,loadUnetModel
+        try:
+            threadWorker=self.startUnetLoading()
+            #threadWorker=loadUnetModelHere(os.path.join(self.modelFolder,self.modelJsonFile))
+            #threadWorker=create_worker(loadUnetModelHere,os.path.join(self.modelFolder,self.modelJsonFile),_start_thread=False)
+            threadWorker.started.connect(lambda: print('>>>> Started loading U-Net model...'))
+            threadWorker.returned.connect(lambda x: self.setUnetModel(x))
+            threadWorker.start()
+        except Exception as e:
+            print(f'Could not load model {self.modelFolder}/{self.modelJsonFile}')
+            print(e)
+            raise(e)
+
+
+    # contour assist using U-Net
+    def contourAssistUNet(self,imp,initROI,initROIdata,intensityThresh,distanceThresh,modelJsonFile,modelWeightsFile):
+        assistedROI=None
+        self.invertedROI=None
+        self.ROIpositionX=0
+        self.ROIpositionY=0
+        print('  >> started assisting...')
+
+        width=imp.shape[0]
+        height=imp.shape[1]
+        ch=imp.shape[2] if len(imp.shape)>2 else 0
+
+        # see if the image is RGB or not
+        origImageType=imp.dtype
+        maxOrigVal=0
+        colourful=False
+        if (origImageType==numpy.dtype('uint8') or origImageType==numpy.dtype('int8')) and ch==0:
+            maxOrigVal=255
+            print('Image type: GRAY8')
+        elif (origImageType==numpy.dtype('uint16') or origImageType==numpy.dtype('int16')) and ch==0:
+            maxOrigVal=65535
+            print('Image type: GRAY16')
+        elif (origImageType==numpy.dtype('float32') or origImageType==numpy.dtype('float64')) and ch==0:
+            maxOrigVal=int(1.0)
+            warnings.warn('Current image is of type float in range [0,1].\nType not supported in suggestion mode.')
+            print('Image type: GRAY32')
+            return None
+        elif (origImageType==numpy.dtype('uint8') or origImageType==numpy.dtype('int8')) and ch==3:
+            # 8-bit indexed image
+            maxOrigVal=255;
+            print('Image type: COLOR_256')
+        elif (origImageType==numpy.dtype('uint32') or origImageType==numpy.dtype('int32')) and ch==3:
+            # 32-bit RGB colour image
+            maxOrigVal=255
+            colourful=True
+            print('Image type: COLOR_RGB')
+        else:
+            maxOrigVal=255
+            print('Image type: default')
+
+
+        # get the bounding box of the current roi
+        initBbox=[]
+        x,y,w,h=cv2.boundingRect(initROIdata) # how to add this bbox: rect=shapes.add_rectangles([[y,x],[y+h,x+w]])
+        initBbox.append(x)
+        initBbox.append(y)
+        initBbox.append(w)
+        initBbox.append(h)
+        #if initBbox[2]<2 or initBbox[3]<2:
+            # 1-pixel width or height, fall back to the orig roi
+
+        print(f'initBbox bounds: ({initBbox[0]},{initBbox[1]}) {initBbox[2]}x{initBbox[3]}')
+        # allow x pixel growth for the new suggested contour
+        tmpBbox=[max(x-int(self.distanceThreshVal/2),0),max(y-int(self.distanceThreshVal/2),0),min(w+int(self.distanceThreshVal/2),width),min(h+int(self.distanceThreshVal/2),height)]
+        '''
+        tmpROI=self.scaleContour(initROIdata,self.calcScale(w,self.distanceThreshVal)) # grow by distance thresh pixels
+        tmpBbox=[]
+        x,y,w,h=cv2.boundingRect(tmpROI)
+        tmpBbox.append(x)
+        tmpBbox.append(y)
+        tmpBbox.append(w)
+        tmpBbox.append(h)
+        '''
+        print(f'tmpROI bounds: ({tmpBbox[0]},{tmpBbox[1]}) {tmpBbox[2]}x{tmpBbox[3]}')
+
+
+        from .predict_unet import callPredictUnet,callPredictUnetLoaded,loadUnetModel
+        # load trained unet model
+        if self.trainedUNetModel is not None:
+            # model already loaded
+            pass
+        else:
+            # load model
+            
+            # model loading was here, moved to its own fcn now
+            self.trainedUNetModel=loadUnetModel(os.path.join(self.modelFolder,self.modelJsonFile),importMode=0)
+
+            # check if model was loaded
+            if self.trainedUNetModel is None:
+                print('Failed to load U-Net model for Contour assist')
+                return None
+        
+        maskImage=None
+
+        # check if this image has a valid prediction
+        if not (self.curPredictionImage is None or self.curOrigImage is None):
+            # check current image for equality too
+            for xLayer in self.viewer.layers:
+                if (xLayer.__class__ is Image):
+                    if xLayer.name=='title':
+                        # temp image, ignore it
+                        continue
+                    elif xLayer.name=='Image':
+                        # current image window
+                        curImageTmp=xLayer.data
+                        if not self.imageFromArgs:
+                            # normal image
+                            if numpy.array_equal(curImageTmp,self.curOrigImage):
+                                # it is the same, no changes applied, we can continue using the previous prediction on it
+                                print('  >> using previous predicted image')
+
+                                maskImage=self.viewer.add_image(self.curPredictionImage,name='title')
+                                tmpLayer=self.findImageLayerName(layerName='title')
+                                if tmpLayer is not None:
+                                    tmpLayer.visible=True
+                            else:
+                                print('  >> current image does not match the previous predicted original image')
+
+                        else:
+                            # stack
+                            if numpy.array_equal(curImageTmp,self.curOrigImage):
+                                # it is the same, no changes applied, we can continue using the previous prediction on it
+                                print('  >> using previous predicted image')
+
+                                maskImage=self.viewer.add_image(self.curPredictionImage,name='title')
+                                tmpLayer=self.findImageLayerName(layerName='title')
+                                if tmpLayer is not None:
+                                    tmpLayer.visible=True
+                            else:
+                                print('  >> current image does not match the previous predicted original image')
+                                self.curPredictionImage=None
+                                #return contourAssistUNet(imp,initROI,intensityThresh,distanceThresh,modelJsonFile,modelWeightsFile)
+                                return None
+
+        else:
+            # need to predict
+
+            # show a dialog informing the user that prediction is being executed and wait
+            # false to make in non-modal
+            predictionStartedDialog=QDialog(self)
+            predictionStartedDialog.setWindowTitle('Suggesting contour, please wait...')
+            #predictionStartedDialog.setText('Creating suggested contour, please wait...')
+            predictionStartedDialog.setModal(False)
+            tmpContainer=QWidget(predictionStartedDialog)
+            tmpContainer.setGeometry(QRect(0,0,250,80))
+            dialogText=QLabel(tmpContainer)
+            dialogText.setText('Creating suggested contour, please wait...')
+            predictionStartedDialog.show()
+
+
+            tmpLayer=self.findImageLayerName(layerName='Image')
+            if tmpLayer is not None:
+                self.curOrigImage=tmpLayer.data
+            else:
+                self.curOrigImage=None
+            if self.curOrigImage is None:
+                warnings.warn("Error","Cannot find image")
+                return None
+
+            print('  >> input image prepared...')
+
+            # divide image by 255!!!!!!!!!!!!!!!
+            #thisImage=self.curOrigImage/255
+
+            # divide image by 255! and resize to 256x256 is handled in the predict_unet script
+
+
+            # debug:
+            #print('  >> input image size: '+thisImage.shape[0]+' x '+thisImage.shape[1])
+            #print('  >> input array size: '+inputs.length)
+            
+            # expects rank 4 array with shape [miniBatchSize,layerInputDepth,inputHeight,inputWidth]
+            predictedImage=callPredictUnetLoaded(self.trainedUNetModel,self.curOrigImage,gpuSetting=self.gpuSetting)
+            print('  >> prediction done...')
+
+            maskImage=self.viewer.add_image(predictedImage,name='title')
+
+            print('  >> predicted image processed...')
+            tmpLayer=self.findImageLayerName(layerName='title')
+            if tmpLayer is not None:
+                tmpLayer.visible=True
+
+            if predictionStartedDialog is not None:
+                predictionStartedDialog.done(1)
+                
+
+
+
+            # store prediction image until this image is closed/ new image is opened
+            self.curPredictionImage=deepcopy(maskImage.data)
+            self.curPredictionImageName=self.defFile
+
+            # -----
+            # debug:
+            #ImagePlus predIm2show=new ImagePlus("prediction",predIm2showProc);
+            #predIm2show.show();
+            #return null;
+            # ----
+
+
+        # -------- here we have a valid prediction image and file name
+
+
+        # crop initROI + distanceTresh pixels bbox of the predmask
+        #cropMask=maskImage.data[x:x+w,y:y+h]
+        #cropMask=maskImage.data[y:y+h,x:x+w]
+        cropMask=maskImage.data[tmpBbox[1]:tmpBbox[1]+tmpBbox[3],tmpBbox[0]:tmpBbox[0]+tmpBbox[2]]
+        t=skimage.filters.threshold_otsu(cropMask)
+        masked=cropMask>t
+
+        # see if the mask needs to be inverted:
+        if self.checkIJMatrixCorners(maskImage.data):
+            # need to invert it
+            print('  >> need to invert mask: true')
+            masked=cropMask<=t
+
+
+
+        # -------- active contour method starts here ------------
+        # moved to its own fcn
+
+        # after everything is done: the new binary image must be converted to selection (Roi) and displayed on the image
+        # create selection command, ThresholdToSelection class
+        intermediateRoi,hierarchy=cv2.findContours(masked.astype(numpy.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        if intermediateRoi is not None:
+            pass
+        else:
+            print('intermediateRoi is None')
+        
+        # run active contour fitting:
+        # not here!
+
+        # store objects needed to run active contour fitting for later
+        # TODO:
+        #acObjects=new ACobjectDump(new ImagePlus(maskImage.getTitle(),maskImage.getProcessor().duplicate()),intermediateRoi,tmpBbox,new ImagePlus(imp.getTitle(),imp.getProcessor().duplicate()));
+
+        # check if there is an output from ac as a roi
+        if (assistedROI is None):# or not(assistedROI.getType()==Roi.FREEROI or assistedROI.getType()==Roi.COMPOSITE or assistedROI.getType()==Roi.TRACED_ROI)):
+            # failed to produce a better suggested contour with AC than we had with unet before, revert to it
+            print('Failed to create new contour with active contours, showing U-Net prediction')
+            imp=None # placeholder
+            assistedROI=deepcopy(intermediateRoi)
+            assistedROI=self.postProcessAssistedROI(assistedROI,tmpBbox,maskImage.data,True,imp,True)
+            # also reset the inverted roi
+            if numpy.array_equal(assistedROI,self.invertedROI):
+                print('Failed to invert current roi (same)')
+            if self.invertedROI is None:
+                print('  null ROI on line #3822')
+
+        
+        # roi positioning was done here, moved to its own fcn
+
+        tmpLayer=self.findImageLayerName(layerName='title')
+        if tmpLayer is not None:
+            self.viewer.layers.remove(tmpLayer)
+        # set main imwindow var to the original image
+
+        return assistedROI
+
+
+        #return initROI
+        #return tmpROI
+
+
+
+    def scaleContour(self,cnt,scale):
+        M=cv2.moments(cnt)
+        cx=int(M['m10']/M['m00']) if M['m00']>0.0 else 0
+        cy=int(M['m01']/M['m00']) if M['m00']>0.0 else 0
+        print(f'cx: {cx}')
+        print(f'cy: {cy}')
+
+        cnt_norm=cnt-[cx, cy]
+        cnt_scaled=cnt_norm*scale
+        cnt_scaled=cnt_scaled+[cx, cy]
+        cnt_scaled=cnt_scaled.astype(numpy.int32)
+
+        return cnt_scaled
+
+
+    def calcScale(self,width,dist):
+        return (width+dist)/width
+
+
+    # to check if the mask needs to be inverted count the corners marked
+    # it at least 2 corners are marked, the mask should be inverted
+    def checkIJMatrixCorners(self,matrix):
+        need2invert=False
+        w=matrix.shape[0]
+        h=matrix.shape[1]
+
+        cornerCount=0
+        if matrix[0][0]>0:
+            cornerCount+=1
+        if matrix[0][h-1]>0:
+            cornerCount+=1
+        if matrix[w-1][0]>0:
+            cornerCount+=1
+        if matrix[w-1][h-1]>0:
+            cornerCount+=1
+
+        if cornerCount>1:
+            # need to invert the image as the background is white
+            need2invert=True
+        return need2invert
+
+
+    def validateROI(self,assistedROI,maskImage):
+
+        if assistedROI is not None and len(assistedROI)>1:
+            # select the largest found object and delete all others
+            assistedROI=self.selectLargestROI(assistedROI)
+
+        # check if we have a valid roi now, else return null
+        if assistedROI is not None:
+
+            curBbox=[]
+            if type(assistedROI) is tuple:
+                assistedROI=assistedROI[0]
+            x,y,w,h=cv2.boundingRect(assistedROI) # how to add this bbox: rect=shapes.add_rectangles([[y,x],[y+h,x+w]])
+            curBbox.append(x)
+            curBbox.append(y)
+            curBbox.append(w)
+            curBbox.append(h)
+            #debug:
+            print('curBbox: ')
+            print(curBbox)
+
+            # check if the corner points are included
+            cornerCount=0
+            if [0.0,0.0] in assistedROI:
+                # top left corner
+                cornerCount+=1
+                print('     (0,0) corner')
+            
+            if [0.0,curBbox[2]] in assistedROI:
+                # ? top right corner
+                cornerCount+=1
+                print('     (0,+) corner')
+            
+            if [curBbox[3],0.0] in assistedROI:
+                # ? lower left corner
+                cornerCount+=1
+                print('     (+,0) corner')
+            
+            if [curBbox[3],curBbox[2]] in assistedROI:
+                # ? lower right corner
+                cornerCount+=1
+                print('     (+,+) corner')
+
+            if cornerCount>1:
+                # at least 2 corners of the crop are included in the final roi, invert it!
+                # store an inverted roi for later option to change
+
+                #assistedROI=assistedROI.getInverse(maskImage)
+                #invertedROI=assistedROI.getInverse(maskImage)
+                print('  >> inverted ROI') # <-- TODO
+                if numpy.array_equal(assistedROI,self.invertedROI):
+                    print('Failed to invert current roi (same)')
+
+                if self.invertedROI is None:
+                    print('  null ROI on line #4137')
+            
+
+
+            # select the largest found object and delete all others
+            assistedROI=self.selectLargestROI(assistedROI)
+
+        
+        return assistedROI
+    
+
+
+    # get the largest roi if multiple objects were detected on the mask
+    def selectLargestROI(self,ROI2check):
+        if type(ROI2check) is tuple:
+            pass
+        elif type(ROI2check) is numpy.ndarray:
+            print('no need to select, already an ndarray')
+            return ROI2check
+        maxSize=0
+        for idx,x in enumerate(ROI2check):
+            if x.shape[0]>maxSize:
+                maxSize=x.shape[0]
+                maxIdx=idx
+
+        # here we have the largest object index as maxIdx
+        ROI2checkRet=ROI2check[maxIdx]
+        print(ROI2checkRet)
+        return ROI2checkRet
+
+
+    def postProcessAssistedROI(self,assistedROI,tmpBbox,maskImage,closeMaskIm,imp,storeRoiCoords):
+
+        # validate current ROI and check if it needs to be inverted
+        assistedROI=self.validateROI(assistedROI,maskImage)
+
+        if assistedROI is None:
+            print('  >> failed to create new contour')
+            if closeMaskIm:
+                # close image window
+                tmpLayer=self.findImageLayerName(layerName='title')
+                if tmpLayer is not None:
+                    self.viewer.layers.remove(tmpLayer)
+            self.invertedROI=None
+            
+            print('  null ROI on line #3909')
+            
+        else:
+            assistedBbox=[]
+            x,y,w,h=cv2.boundingRect(assistedROI)
+            assistedBbox.append(x)
+            assistedBbox.append(y)
+            assistedBbox.append(w)
+            assistedBbox.append(h)
+            print(f'assistedROI bounds: ({assistedBbox[0]},{assistedBbox[1]}) {assistedBbox[2]}x{assistedBbox[3]}')
+
+            # store an inverted roi for later option to change
+            # TODO: ˇˇ
+            #invertedROI=assistedROI.getInverse(maskImage);
+            print('Stored inverse ROI')
+            if self.invertedROI is None:
+                print('  null ROI on line #4309')
+            else:
+                if numpy.array_equal(assistedROI,self.invertedROI):
+                    print('Failed to invert current roi (same)')
+                
+
+            # store the coordinates of the roi's bounding box
+            if storeRoiCoords:
+                
+                self.ROIpositionX=tmpBbox[0]
+                self.ROIpositionY=tmpBbox[1]
+                print('ROIposition (X,Y): '+str(self.ROIpositionX)+','+str(self.ROIpositionY))
+
+
+            if self.invertedROI is None:
+                print('  null ROI on line #4328')
+            
+
+            if closeMaskIm:
+                # close image window
+                tmpLayer=self.findImageLayerName(layerName='title')
+                if tmpLayer is not None:
+                    self.viewer.layers.remove(tmpLayer)
+
+
+            # place new ROI on the new mask
+            # added in contAssistROI fcn
+            '''
+            roiLayer=self.findROIlayer()
+            shape=numpy.array(numpy.fliplr(numpy.squeeze(assistedROI)))
+            roiLayer.add_polygons(shape)
+            roiLayer.refresh()
+            '''
+            # flip x,y here because they will be flipped later <-- nope
+            assistedROI=assistedROI+[self.ROIpositionX,self.ROIpositionY]
+
+        #return assistedROI
+        return numpy.array(numpy.fliplr(numpy.squeeze(assistedROI)))
+
+
+    def addContAssistLayer(self):
+        shapesLayer=self.findROIlayer()
+        curColour=shapesLayer._data_view._edge_color[-1] if len(shapesLayer.data)>0 else 'white'
+        # create temp layer for contour assist
+        shapesLayer2=Shapes(name='contourAssist',shape_type='polygon',edge_width=2,edge_color=curColour,face_color=[0,0,0,0])
+        self.viewer.add_layer(shapesLayer2)
+        return shapesLayer2
+
+
     def setEditMode(self,state):
         shapesLayer=self.findROIlayer()
         if state == Qt.Checked:
@@ -1554,11 +2384,21 @@ class AnnotatorJ(QWidget):
             # set the "select shapes" mode
             shapesLayer.mode = 'select'
 
+            self.contAssist=False
+            self.chckbxContourAssist.setChecked(False)
+            self.chckbxContourAssist.setEnabled(False)
+            self.chckbxClass.setChecked(False)
+            self.chckbxClass.setEnabled(False)
+            self.classMode=False
+
         else:
             self.editMode=False
             print('Edit mode cleared')
             # set the "add polygon" mode
             shapesLayer.mode = 'add_polygon'
+
+            self.chckbxContourAssist.setEnabled(True)
+            self.chckbxClass.setEnabled(True)
 
 
     def showCnt(self,state):
@@ -1570,6 +2410,48 @@ class AnnotatorJ(QWidget):
         else:
             print('Show contours cleared')
             shapesLayer.visible=False
+
+
+
+    def setContourAssist(self,state):
+        shapesLayer=self.findROIlayer()
+        if state == Qt.Checked:
+            self.contAssist=True
+            print('Contour assist selected')
+            
+            # disable auto adding was here, but it is already on by default
+
+            # should set boolean vars to:
+                    # first start freehand selection tool for drawing -->
+                        # on mouse release start contour correction -->
+                            # user can check it visually -->
+                                # set brush selection tool for contour modification -->
+                                    # detect pressing "q" when they add the new contour -->
+                                        # reset freehand selection tool
+
+            # add drawing layer for contour assist
+            shapesLayer2=self.addContAssistLayer()
+            self.addFreeROIdrawingCA(shapesLayer2)
+
+            shapesLayer2.mode='add_polygon'
+
+            self.editMode=False
+            #self.chckbxStepThroughContours.setChecked(False)
+            #self.chckbxStepThroughContours.setEnabled(False)
+
+            self.chckbxClass.setChecked(False)
+            self.chckbxClass.setEnabled(False)
+            self.classMode=False
+
+        else:
+            self.contAssist=False
+            print('Contour assist cleared')
+
+            # can enable auto add again
+            #self.chckbxAddAutomatically.setEnabled(True)
+            #self.chckbxStepThroughContours.setEnabled(True)
+            self.chckbxClass.setEnabled(True)
+            
 
 
 # -------------------------------------
