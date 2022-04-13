@@ -98,7 +98,9 @@ class AnnotatorJ(QWidget):
         self.curPredictionImage=None
         self.curPredictionImageName=None
         self.curOrigImage=None
-        self.gpuSetting='0'
+        # '0' is the default GPU if any, otherwise fall back to cpu
+        # valid values are: ['cpu','0','1','2',...]
+        self.gpuSetting='cpu'
 
         # default options for contour assist and semantic annotation
         # can be overwritten in config file
@@ -364,6 +366,10 @@ class AnnotatorJ(QWidget):
                     print('Could not open file: {}'.format(destNameRaw))
                     return
 
+                self.curPredictionImageName=self.defFile
+                self.curPredictionImage=None
+                self.curOrigImage=None
+
         imageLayer = self.viewer.add_image(img,name='Image')
 
         # check if a shapes layer already exists for the rois
@@ -414,6 +420,12 @@ class AnnotatorJ(QWidget):
 
         # TODO: add missing settings
 
+
+        # reset contour assist layer
+        if self.contAssist:
+            self.setContourAssist(Qt.Checked)
+        else:
+            self.setContourAssist(False)
 
         # when open function finishes:
         self.started=True
@@ -973,6 +985,10 @@ class AnnotatorJ(QWidget):
         else:
             roiwrite(roiFileName,rois2save)
             print('Saved ROI: {}'.format(roiFileName))
+
+
+        print('finished saving')
+        self.finishedSaving=True
 
 
 
@@ -1884,8 +1900,10 @@ class AnnotatorJ(QWidget):
                 print(f'Model file {self.modelJsonFile} [.json and _weights.h5, or .hdf5] does not exist')
                 return None
         #from .predict_unet import callPredictUnet,callPredictUnetLoaded,loadUnetModel
-        from .predict_unet import loadUnetModel
-        model=loadUnetModel(os.path.join(self.modelFolder,self.modelJsonFile),importMode=importMode)
+        #from .predict_unet import loadUnetModel
+        from .predict_unet import loadUnetModelSetGpu
+        #model=loadUnetModel(os.path.join(self.modelFolder,self.modelJsonFile),importMode=importMode)
+        model=loadUnetModelSetGpu(os.path.join(self.modelFolder,self.modelJsonFile),importMode=importMode,gpuSetting=self.gpuSetting)
         print('  >> importing done...')
         print('  >> no exception in loading the model...')
         return model
@@ -1980,7 +1998,8 @@ class AnnotatorJ(QWidget):
         print(f'tmpROI bounds: ({tmpBbox[0]},{tmpBbox[1]}) {tmpBbox[2]}x{tmpBbox[3]}')
 
 
-        from .predict_unet import callPredictUnet,callPredictUnetLoaded,loadUnetModel
+        #from .predict_unet import callPredictUnet,callPredictUnetLoaded,loadUnetModel
+        from .predict_unet import callPredictUnet,callPredictUnetLoadedNoset,loadUnetModelSetGpu
         # load trained unet model
         if self.trainedUNetModel is not None:
             # model already loaded
@@ -1989,7 +2008,8 @@ class AnnotatorJ(QWidget):
             # load model
             
             # model loading was here, moved to its own fcn now
-            self.trainedUNetModel=loadUnetModel(os.path.join(self.modelFolder,self.modelJsonFile),importMode=0)
+            #self.trainedUNetModel=loadUnetModel(os.path.join(self.modelFolder,self.modelJsonFile),importMode=0)
+            self.trainedUNetModel=loadUnetModelSetGpu(os.path.join(self.modelFolder,self.modelJsonFile),importMode=0,gpuSetting=self.gpuSetting)
 
             # check if model was loaded
             if self.trainedUNetModel is None:
@@ -2020,7 +2040,7 @@ class AnnotatorJ(QWidget):
                                 if tmpLayer is not None:
                                     tmpLayer.visible=True
                             else:
-                                print('  >> current image does not match the previous predicted original image')
+                                print('  >> current image does not match the previous predicted original image (image)')
 
                         else:
                             # stack
@@ -2033,7 +2053,7 @@ class AnnotatorJ(QWidget):
                                 if tmpLayer is not None:
                                     tmpLayer.visible=True
                             else:
-                                print('  >> current image does not match the previous predicted original image')
+                                print('  >> current image does not match the previous predicted original image (stack)')
                                 self.curPredictionImage=None
                                 #return contourAssistUNet(imp,initROI,intensityThresh,distanceThresh,modelJsonFile,modelWeightsFile)
                                 return None
@@ -2076,7 +2096,8 @@ class AnnotatorJ(QWidget):
             #print('  >> input array size: '+inputs.length)
             
             # expects rank 4 array with shape [miniBatchSize,layerInputDepth,inputHeight,inputWidth]
-            predictedImage=callPredictUnetLoaded(self.trainedUNetModel,self.curOrigImage,gpuSetting=self.gpuSetting)
+            #predictedImage=callPredictUnetLoaded(self.trainedUNetModel,self.curOrigImage,gpuSetting=self.gpuSetting)
+            predictedImage=callPredictUnetLoadedNoset(self.trainedUNetModel,self.curOrigImage)
             print('  >> prediction done...')
 
             maskImage=self.viewer.add_image(predictedImage,name='title')
@@ -2292,7 +2313,6 @@ class AnnotatorJ(QWidget):
 
         # here we have the largest object index as maxIdx
         ROI2checkRet=ROI2check[maxIdx]
-        print(ROI2checkRet)
         return ROI2checkRet
 
 
@@ -2370,9 +2390,14 @@ class AnnotatorJ(QWidget):
         shapesLayer=self.findROIlayer()
         curColour=shapesLayer._data_view._edge_color[-1] if len(shapesLayer.data)>0 else 'white'
         # create temp layer for contour assist
-        shapesLayer2=Shapes(name='contourAssist',shape_type='polygon',edge_width=2,edge_color=curColour,face_color=[0,0,0,0])
-        self.viewer.add_layer(shapesLayer2)
-        return shapesLayer2
+        contAssistLayer=self.findROIlayer(layerName='contourAssist')
+        if contAssistLayer is not None:
+            #self.viewer.layers.remove(contAssistLayer)
+            return contAssistLayer
+        else:
+            shapesLayer2=Shapes(name='contourAssist',shape_type='polygon',edge_width=2,edge_color=curColour,face_color=[0,0,0,0])
+            self.viewer.add_layer(shapesLayer2)
+            return shapesLayer2
 
 
     def setEditMode(self,state):
@@ -2451,6 +2476,11 @@ class AnnotatorJ(QWidget):
             #self.chckbxAddAutomatically.setEnabled(True)
             #self.chckbxStepThroughContours.setEnabled(True)
             self.chckbxClass.setEnabled(True)
+
+            # close remaining contour assist temp layer if present
+            contAssistLayer=self.findROIlayer(layerName='contourAssist')
+            if contAssistLayer is not None:
+                self.viewer.layers.remove(contAssistLayer)
             
 
 

@@ -45,6 +45,33 @@ def loadUnetModel(modelName,importMode=0):
 		print(f"Loaded model from disk: {modelName}_weights.h5")
 	finally:
 		return model
+
+
+def loadUnetModelSetGpu(modelName,importMode=0,gpuSetting='0'):
+	setGpu(gpuSetting)
+	model=None
+	# load json and create model
+	print('starting loadUnetModel...')
+	try:
+		if importMode==0:
+			# import from '.json' + '_weights.h5' files
+			json_file = open(modelName+'.json', 'r')
+			loaded_model_json = json_file.read()
+			json_file.close()
+			model = model_from_json(loaded_model_json)
+			# load weights into new model
+			model.load_weights(modelName+'_weights.h5')
+		elif importMode==1:
+			# import from a single '.hdf5' file
+			model=load_model(modelName+'.hdf5')
+	except Exception as e:
+		print(f'Could not load model {modelName}_weights.h5')
+		print(e)
+		raise(e)
+	else:
+		print(f"Loaded model from disk: {modelName}_weights.h5")
+	finally:
+		return model
 		
 
 def trainIfNoModel(args):
@@ -162,7 +189,7 @@ def setGpu(gpuSetting='0'):
 		else:
 			# check if there is a gpu at all
 			g=tf.config.list_physical_devices('GPU')
-			if len(g)>=int(gpuSetting):
+			if len(g)>int(gpuSetting):
 				tf.config.set_visible_devices(g[int(gpuSetting)], 'GPU')
 				print(f'Using GPU {gpuSetting} for U-Net predictions')
 			else:
@@ -179,6 +206,11 @@ def callPredictUnet(modelName,imageName,gpuSetting='0'):
 
 def callPredictUnetLoaded(model,imageName,gpuSetting='0'):
 	setGpu(gpuSetting)
+	pred=predictUnet(model,imageName)
+	return pred
+
+
+def callPredictUnetLoadedNoset(model,imageName):
 	pred=predictUnet(model,imageName)
 	return pred
 
