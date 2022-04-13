@@ -1897,7 +1897,7 @@ class AnnotatorJ(QWidget):
                 print('  >> importing from a single .hdf5 file...')
                 importMode=1
             else:
-                print(f'Model file {self.modelJsonFile} [.json and _weights.h5, or .hdf5] does not exist')
+                print(f'Model file {self.modelJsonFile} [.json and _weights.h5, or .hdf5] does not exist in model folder {self.modelFolder}')
                 return None
         #from .predict_unet import callPredictUnet,callPredictUnetLoaded,loadUnetModel
         #from .predict_unet import loadUnetModel
