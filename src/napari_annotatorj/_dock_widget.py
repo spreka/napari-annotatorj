@@ -12,7 +12,7 @@ from magicgui import magic_factory
 import os
 import skimage.io
 from roifile import ImagejRoi,ROI_TYPE,roiwrite
-from napari.layers import Shapes, Image
+from napari.layers import Shapes, Image, Labels
 import numpy
 from qtpy.QtCore import Qt,QSize,QRect
 from qtpy.QtGui import QPixmap
@@ -114,6 +114,8 @@ class AnnotatorJ(QWidget):
         # brush sizes
         self.correctionBrushSize=10
         self.semanticBrushSize=50
+
+        self.defColour='white'
 
         # supported image formats
         self.imageExsts=['.png','.bmp','.jpg','.jpeg','.tif','.tiff']
@@ -333,6 +335,7 @@ class AnnotatorJ(QWidget):
 
                 self.classMode=False
                 self.chckbxClass.setEnabled(False)
+                self.chckbxClass.setStyleSheet("color: gray")
 
             # check edit mode setting
             if self.editMode:
@@ -341,9 +344,11 @@ class AnnotatorJ(QWidget):
                 print('< edit mode is active')
                 self.contAssist=False
                 self.chckbxContourAssist.setEnabled(False)
+                self.chckbxContourAssist.setStyleSheet("color: gray")
 
                 self.classMode=False
                 self.chckbxClass.setEnabled(False)
+                self.chckbxClass.setStyleSheet("color: gray")
 
 
             if not self.imageFromArgs:
@@ -553,7 +558,7 @@ class AnnotatorJ(QWidget):
     def initRoiManager(self):
         # the rois will be stored in this object as in ImageJ's RoiManager
         self.manager=None
-        roiProps={'name':[],'class':[],'nameInt':[]}
+        roiProps={'name':['0001'],'class':[0],'nameInt':[1]}
         roiTextProps={
             'text': '{nameInt}: ({class})',
             'anchor': 'center',
@@ -562,8 +567,10 @@ class AnnotatorJ(QWidget):
             'visible':False
         }
         # add an empty shapes layer
-        shapesLayer=Shapes(data=None,shape_type='polygon',name='ROI',edge_width=0.5,edge_color='white',face_color=[0,0,0,0],properties=None,text=roiTextProps)
+        shapesLayer=Shapes(data=numpy.array([[0,0],[1,1]]),shape_type='polygon',name='ROI',edge_width=0.5,edge_color='white',face_color=[0,0,0,0],properties=roiProps,text=roiTextProps)
         self.viewer.add_layer(shapesLayer)
+        # remove dummy shape used to init text props and its visibility
+        shapesLayer._data_view.remove(0)
         # select the "select shape" mode from the controls by default
         #shapesLayer.mode = 'select'
         # select the "add polygon" mode from the controls by default to enable freehand ROI drawing
@@ -658,7 +665,7 @@ class AnnotatorJ(QWidget):
 
         roiList=[]
         roiType='polygon' # default to this
-        defColour='white'
+        #self.defColour='white'
 
         hasColour=False
         roiColours=[]
@@ -701,7 +708,7 @@ class AnnotatorJ(QWidget):
                 roiColours.append(curColour)
                 roiProps['class'].append(curClass)
             else:
-                roiColours.append(defColour)
+                roiColours.append(self.defColour)
                 roiProps['class'].append(0)
 
             # store the roi's name
@@ -754,10 +761,11 @@ class AnnotatorJ(QWidget):
         return s
 
 
-    def findROIlayer(self,setLayer=False,layerName='ROI'):
+    def findROIlayer(self,setLayer=False,layerName='ROI',quiet=False):
         for x in self.viewer.layers:
             if (x.__class__ is Shapes and x.name==layerName):
-                print('{} is the ROI shapes layer'.format(x.name))
+                if not quiet:
+                    print('{} is the ROI shapes layer'.format(x.name))
                 # bring it to the front
                 n=len(self.viewer.layers)
                 xLayerIdx=self.viewer.layers.index(x)
@@ -817,9 +825,22 @@ class AnnotatorJ(QWidget):
         print('Could not find the Image layer')
 
 
+    def findLabelsLayerName(self,echo=True,layerName='editing'):
+        for x in reversed(self.viewer.layers):
+            if (x.__class__ is Labels and x.name==layerName):
+                if echo:
+                    print('{} is the uppermost labels layer'.format(x.name))
+                # return it
+                return x
+            else:
+                pass
+        # log if the Image layer could not be found
+        print('Could not find the Labels layer')
+
+
     def addROIdata(self,layer,rois):
         roiType='polygon' # default to this
-        defColour='white'
+        #self.defColour='white'
 
         hasColour=False
         roiProps={'name':[],'class':[],'nameInt':[]}
@@ -864,7 +885,7 @@ class AnnotatorJ(QWidget):
                 curColour=self.classColourLUT[curClass]
                 roiProps['class']=curClass
             else:
-                curColour=defColour
+                curColour=self.defColour
                 roiProps['class']=0
 
             # store the roi's name
@@ -1038,7 +1059,7 @@ class AnnotatorJ(QWidget):
         if layer.mode=='add_polygon':
             dragged=False
             freeCoords=[]
-            defColour='white'
+            #self.defColour='white'
             # on move
             while event.type == 'mouse_move':
                 dragged = True
@@ -1053,9 +1074,9 @@ class AnnotatorJ(QWidget):
                 freeCoords.append(coords)
                 # mimic an 'esc' key press to quit the basic add_polygon method
                 key_bindings.finish_drawing_shape(layer)
-                print(freeCoords)
+                #print(freeCoords)
                 # add the coords as a new shape
-                layer.add(data=freeCoords,shape_type='polygon',edge_width=0.5,edge_color=defColour,face_color=[0,0,0,0])
+                layer.add(data=freeCoords,shape_type='polygon',edge_width=0.5,edge_color=self.defColour,face_color=[0,0,0,0])
                 if self.contAssist and not self.inAssisting:
                     self.contAssistROI()
             # else: do nothing
@@ -1069,7 +1090,7 @@ class AnnotatorJ(QWidget):
         yield
         if layer.mode=='add_polygon':
             dragged=False
-            defColour='white'
+            #self.defColour='white'
             # on move
             while event.type == 'mouse_move':
                 dragged = True
@@ -1370,6 +1391,33 @@ class AnnotatorJ(QWidget):
             yield
 
 
+    def rejectEdit2(self,labelLayer):
+        if not self.startedEditing:
+            print('Cannot reject edited contour when not \'startedEditing\'')
+            return
+        #no need to yield, not an event callback
+
+        print('Esc pressed - restoring original contour')
+
+        roiLayer=self.findROIlayer()
+        shape=self.origEditedROI.shape
+        if shape is None:
+            print('Failed to find previous version of this ROI, cannot revert to it')
+        else:
+            roiLayer._data_view.edit(self.editROIidx,shape)
+            # reset colour and width
+            roiLayer._data_view.update_edge_color(self.editROIidx,self.origEditedROI.edgeColour)
+            roiLayer._data_view.update_edge_width(self.editROIidx,self.origEditedROI.edgeWidth)
+            roiLayer.refresh()
+            print('Restored edited ROI to its original')
+
+        # store updated brush size
+        self.brushSize=labelLayer.brush_size
+
+        # clear everything
+        self.cleanUpAfterEdit(labelLayer,roiLayer)
+
+
     def acceptContAssist(self,labelLayer):
         if not self.inAssisting:
             print('Cannot accept suggested contour when not \'inAssisting\'')
@@ -1400,7 +1448,7 @@ class AnnotatorJ(QWidget):
 
             shape=numpy.array(numpy.fliplr(numpy.squeeze(contour)))
             roiLayer=self.findROIlayer()
-            roiLayer.add_polygons(shape)
+            roiLayer.add_polygons(shape,edge_color=self.defColour,face_color=None,edge_width=0.5)
             roiLayer.refresh()
             print('Added ROI ('+str(len(roiLayer.data))+'.) - assist mode')
 
@@ -1617,17 +1665,27 @@ class AnnotatorJ(QWidget):
 
     def updateNewROIprops(self,event):
         curROIlayerName='ROI' # if not self.contAssist else 'contourAssist'
-        roiLayer=self.findROIlayer(layerName=curROIlayerName)
-        #debug:
-        print(f'---- {len(roiLayer.data)} rois on layer ----')
-        print(f'---- {self.roiCount} rois in manager ----')
+        roiLayer=self.findROIlayer(layerName=curROIlayerName,quiet=True)
 
         # check the number of shapes on the layer
         n=len(roiLayer.data)
+
+        if self.roiCount==n:
+            # already done
+            return
+        #debug:
+        print(f'---- {n} rois on layer ----')
+        print(f'---- {self.roiCount} rois in manager ----')
+
         if n==1:
             # empty shapes layer, init the props
             roiLayer.properties={'name':['0001'],'class':[0],'nameInt':[1]}
-        elif self.roiCount<n:
+        elif n==0:
+            # this should never happen
+            print('update ROI props function called on empty layer')
+            pass
+        #else:
+        elif self.roiCount==n-1:
             # the latest roi is the new one, rename it
             lastNumber=roiLayer.properties['nameInt'][-2] # second last in the list
             roiLayer.properties['nameInt'][-1]=lastNumber+1
@@ -1636,10 +1694,13 @@ class AnnotatorJ(QWidget):
             roiLayer.properties['class'][-1]=0
         elif self.roiCount>n:
             self.roiCount=n-1
+        else:
+            print(f'unexpected values: {n} rois on layer, {self.roiCount} rois in managaer')
 
         # update text properties for display option
         roiLayer.text.refresh_text(roiLayer.properties)
-        self.roiCount+=1
+        #self.roiCount+=1
+        self.roiCount=len(roiLayer.data)
         print(f'roiCount: {self.roiCount}')
         self.roiLayer=roiLayer
 
@@ -2412,18 +2473,37 @@ class AnnotatorJ(QWidget):
             self.contAssist=False
             self.chckbxContourAssist.setChecked(False)
             self.chckbxContourAssist.setEnabled(False)
+            self.chckbxContourAssist.setStyleSheet("color: gray")
             self.chckbxClass.setChecked(False)
             self.chckbxClass.setEnabled(False)
+            self.chckbxClass.setStyleSheet("color: gray")
             self.classMode=False
 
         else:
+            # close remaining editing temp layer if present
+            editLayer=self.findLabelsLayerName()
+            if editLayer is not None:
+                self.rejectEdit2(editLayer)
+                #self.viewer.layers.remove(editLayer)
+            else:
+                print('editLayer is None')
+
+            #self.startedEditing=False
+            #self.origEditedROI=None
+
+            # make the ROI layer the active one
+            #roiLayer=self.findROIlayer()
+            #self.viewer.layers.selection.add(roiLayer)
+
             self.editMode=False
             print('Edit mode cleared')
             # set the "add polygon" mode
             shapesLayer.mode = 'add_polygon'
 
             self.chckbxContourAssist.setEnabled(True)
+            self.chckbxContourAssist.setStyleSheet("color: white")
             self.chckbxClass.setEnabled(True)
+            self.chckbxClass.setStyleSheet("color: white")
 
 
     def showCnt(self,state):
@@ -2460,12 +2540,16 @@ class AnnotatorJ(QWidget):
 
             shapesLayer2.mode='add_polygon'
 
+            self.chkEdit.setChecked(False)
+            self.chkEdit.setEnabled(False)
+            self.chkEdit.setStyleSheet("color: gray")
             self.editMode=False
             #self.chckbxStepThroughContours.setChecked(False)
             #self.chckbxStepThroughContours.setEnabled(False)
 
             self.chckbxClass.setChecked(False)
             self.chckbxClass.setEnabled(False)
+            self.chckbxClass.setStyleSheet("color: gray")
             self.classMode=False
 
         else:
@@ -2476,11 +2560,33 @@ class AnnotatorJ(QWidget):
             #self.chckbxAddAutomatically.setEnabled(True)
             #self.chckbxStepThroughContours.setEnabled(True)
             self.chckbxClass.setEnabled(True)
+            self.chckbxClass.setStyleSheet("color: white")
+            self.chkEdit.setEnabled(True)
+            self.chkEdit.setStyleSheet("color: white")
+
+            # close remaining editing temp layer if present
+            editLayer=self.findLabelsLayerName()
+            if editLayer is not None:
+                self.viewer.layers.remove(editLayer)
+            else:
+                print('editLayer is None')
 
             # close remaining contour assist temp layer if present
             contAssistLayer=self.findROIlayer(layerName='contourAssist')
             if contAssistLayer is not None:
                 self.viewer.layers.remove(contAssistLayer)
+
+            # reset vars
+            self.inAssisting=False
+            self.invertedROI=None
+            self.ROIpositionX=0
+            self.ROIpositionY=0
+            self.acObjects=None
+            self.startedEditing=False
+            self.origEditedROI=None
+
+            # make the ROI layer the active one
+            self.viewer.layers.selection.add(shapesLayer)
             
 
 
