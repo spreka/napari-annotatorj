@@ -6,7 +6,7 @@ see: https://napari.org/docs/dev/plugins/hook_specifications.html
 
 Replace code below according to your needs.
 """
-from qtpy.QtWidgets import QWidget, QHBoxLayout,QVBoxLayout, QPushButton, QCheckBox,QLabel,QMessageBox,QFileDialog,QDialog
+from qtpy.QtWidgets import QWidget, QHBoxLayout,QVBoxLayout, QPushButton, QCheckBox,QLabel,QMessageBox,QFileDialog,QDialog,QComboBox,QListWidget,QAbstractItemView
 from magicgui import magic_factory
 
 import os
@@ -117,6 +117,16 @@ class AnnotatorJ(QWidget):
 
         self.defColour='white'
 
+        self.classesFrame=None
+        self.listModelClasses=None
+        self.selectedClassColourIdx=None
+        self.classFrameNames=[]
+        self.selectedClassNameNumber=-2
+        self.defaultClassNumber=-1
+        self.classNumberCounter=0
+        self.classNameLUT={} # dict: string:int
+        self.classFrameColours=[]
+
         # supported image formats
         self.imageExsts=['.png','.bmp','.jpg','.jpeg','.tif','.tiff']
 
@@ -191,7 +201,8 @@ class AnnotatorJ(QWidget):
         # class mode
         self.chckbxClass = QCheckBox('Class mode')
         self.chckbxClass.setChecked(False)
-        #self.chckbxClass.stateChanged.connect(self.setClassMode)
+        self.chckbxClass.stateChanged.connect(self.setClassMode)
+        self.chckbxClass.setToolTip('Allows switching to contour classification mode. Select with mouse click.')
 
 
         # add labels
@@ -205,19 +216,19 @@ class AnnotatorJ(QWidget):
         self.logo.setPixmap(scaled)
 
         bsize=int(self.btnOpen.size().width())
-        bsize2=70
+        self.bsize2=70
         labelsize=120
 
         # set button sizes
-        self.btnOpen.setStyleSheet(f"max-width: {bsize2}px")
-        self.btnLoad.setStyleSheet(f"max-width: {bsize2}px")
-        self.btnSave.setStyleSheet(f"max-width: {bsize2}px")
-        self.btnExport.setStyleSheet(f"max-width: {bsize2}px")
-        self.btnOverlay.setStyleSheet(f"max-width: {bsize2}px")
-        self.buttonPrev.setStyleSheet(f"min-width: {int(bsize2/2)}px;")
-        self.buttonNext.setStyleSheet(f"min-width: {int(bsize2/2)}px;")
-        self.buttonOptions.setStyleSheet(f"max-width: {bsize2}px")
-        self.btnColours.setStyleSheet(f"max-width: {bsize2}px")
+        self.btnOpen.setStyleSheet(f"max-width: {self.bsize2}px")
+        self.btnLoad.setStyleSheet(f"max-width: {self.bsize2}px")
+        self.btnSave.setStyleSheet(f"max-width: {self.bsize2}px")
+        self.btnExport.setStyleSheet(f"max-width: {self.bsize2}px")
+        self.btnOverlay.setStyleSheet(f"max-width: {self.bsize2}px")
+        self.buttonPrev.setStyleSheet(f"min-width: {int(self.bsize2/2)}px;")
+        self.buttonNext.setStyleSheet(f"min-width: {int(self.bsize2/2)}px;")
+        self.buttonOptions.setStyleSheet(f"max-width: {self.bsize2}px")
+        self.btnColours.setStyleSheet(f"max-width: {self.bsize2}px")
         self.lblCurrentFile.setStyleSheet(f"width: {labelsize}px")
 
         # set layouts
@@ -2587,6 +2598,36 @@ class AnnotatorJ(QWidget):
 
             # make the ROI layer the active one
             self.viewer.layers.selection.add(shapesLayer)
+
+
+    def setClassMode(self,state):
+        shapesLayer=self.findROIlayer()
+        if state == Qt.Checked:
+            self.classMode=True
+            print('Class mode selected')
+
+            # disable automatic adding to list and contour assist while editing
+            print('Switching automatic adding and contour assist off')
+            self.addAuto=False
+            #self.chckbxAddAutomatically.setChecked(False)
+            #self.chckbxAddAutomatically.setEnabled(False)
+
+            self.contAssist=False
+            self.chckbxContourAssist.setChecked(False)
+            self.chckbxContourAssist.setEnabled(False)
+
+            self.editMode=False
+            #self.chckbxStepThroughContours.setChecked(False)
+            #self.chckbxStepThroughContours.setEnabled(False)
+
+            # start the classes frame
+            self.classesFrame=ClassesFrame(self.viewer,self.bsize2,self.listModelClasses,self.classFrameNames,self.defaultClassNumber)
+
+        else:
+            self.classMode=False
+            print('Class mode cleared')
+
+            self.chckbxContourAssist.setEnabled(True)
             
 
 
@@ -2626,3 +2667,444 @@ class BackupROI():
 # -------------------------------------
 # end of class BackupROI
 # -------------------------------------
+
+
+# new frame for classes when selecting the "Class mode" checkbox in the main frame
+class ClassesFrame(QWidget):
+    def __init__(self,napari_viewer,pbtnSize,pclassList,pclassFrameNames,pdefaultClassNumber):
+        super().__init__()
+        self.viewer = napari_viewer
+        self.bsize=pbtnSize
+
+        # check if there is opened instance of this frame
+        # the main plugin is: 'napari-annotatorj: Annotator J'
+        if 'Classes' in self.viewer.window._dock_widgets:
+            # already opened
+            return
+
+        #self.classesFrame=QWidget()
+        #self.classesFrame.setWindowTitle('Classes')
+        #self.classesFrame.resize(350, 200)
+        '''
+        self.classesFrame.addWindowListener(new WindowAdapter() {
+            public void windowClosing(WindowEvent e) {
+                self.classesFrame.dispose();
+                self.classesFrame=null;
+            }
+        });
+        '''
+
+        self.classNameLUT={}
+        self.listModelClasses=pclassList
+        self.classFrameNames=pclassFrameNames
+        self.classListSelectionHappened=False
+        self.defaultClassNumber=pdefaultClassNumber
+        
+        self.lblClasses=QLabel('Classes')
+        self.lblCurrentClass=QLabel('Current:')
+
+        self.btnAddClass=QPushButton('+')
+        self.btnAddClass.setToolTip('Add a new class')
+        self.btnAddClass.clicked.connect(self.addNewClass)
+        self.btnAddClass.setStyleSheet(f"max-width: {int(self.bsize/2)}px")
+
+        self.btnDeleteClass=QPushButton('-')
+        self.btnDeleteClass.setToolTip('Delete current class')
+        self.btnDeleteClass.clicked.connect(self.deleteClass)
+        self.btnDeleteClass.setStyleSheet(f"max-width: {int(self.bsize/2)}px")
+
+        self.classListList=QListWidget()
+
+        # list of colours
+        self.rdbtnGroup=QComboBox()
+        self.rdbtnGroup.addItem('Red')
+        self.rdbtnGroup.addItem('Green')
+        self.rdbtnGroup.addItem('Blue')
+        self.rdbtnGroup.addItem('Cyan')
+        self.rdbtnGroup.addItem('Magenta')
+        self.rdbtnGroup.addItem('Yellow')
+        self.rdbtnGroup.addItem('Orange')
+        self.rdbtnGroup.addItem('White')
+        self.rdbtnGroup.addItem('Black')
+        
+        self.rdbtnGroup.currentIndexChanged.connect(self.classColourBtnChanged)
+
+        # add default class option as a combo box
+        self.lblClassDefault=QLabel('Default:')
+        
+        self.comboBoxDefaultClass=QComboBox()
+        self.comboBoxDefaultClass.setToolTip('Assign this class to all objects by default.')
+
+
+        curColourName='red'
+        if self.listModelClasses is None or len(self.listModelClasses)==0:
+            self.classListList.insertItem(0,'Class_01')
+            self.classListList.insertItem(1,'Class_02')
+            self.listModelClasses=[]
+            self.listModelClasses.append('Class_01')
+            self.listModelClasses.append('Class_02')
+            self.classFrameColours=[0,1]
+            self.classFrameNames=['Class_01','Class_02']
+
+            self.selectedClassNameNumber=1
+            self.classListList.setCurrentItem(self.classListList.item(0))
+
+            # set default roi group to 0
+            pluginInstance=AnnotatorJ(self.viewer)
+            roiLayer=pluginInstance.findROIlayer()
+            for idx,roi in enumerate(roiLayer.data):
+                roiLayer.properties['class'][idx]=0
+
+            self.comboBoxDefaultClass.addItem('(none)')
+            self.comboBoxDefaultClass.addItem('Class_01')
+            self.comboBoxDefaultClass.addItem('Class_02')
+
+            self.comboBoxDefaultClass.setCurrentIndex(0)
+
+            self.defaultClassNumber=0 #-1
+
+            self.classNumberCounter=2
+
+            self.classNameLUT['Class_01']=1
+            self.classNameLUT['Class_02']=2
+
+        else:
+            for idx,classi in enumerate(self.classListList):
+                self.classListList.insertItem(idx,classi)
+
+            # set default class selection list
+            self.comboBoxDefaultClass.addItem('(none)')
+
+            for i,el in enumerate(self.classFrameNames):
+                curClassName=el
+                if curClassName is None:
+                    continue
+                self.listModelClasses.append(curClassName)
+                self.comboBoxDefaultClass.addItem(curClassName)
+
+                curClassNum=int(curClassName[curClassName.find("_")+1:-1])
+                print(f'classFrameNames.[i]: {classFrameNames[i]}, curClassNum: {curClassNum}')
+                print(self.classNameLUT)
+
+                self.classNameLUT[{classFrameNames[i]}]=curClassNum
+
+            # set selected colour for the previously selected class and colour
+            selectedClassNameVar='Class_{:02d}'.format(self.selectedClassNameNumber)
+            selectedClassIdxList=classFrameNames.index(selectedClassNameVar)
+            if selectedClassIdxList==-1:
+                # could not find the selected class in the list e.g. if reimport didnt work well
+                print('Could not find the selected class in the list of classes, using the first.')
+                selectedClassIdxList=0
+                self.classListList.setCurrentItem(self.classListList.item(0))
+                tmpString=classListList.currentItem().text()
+                if tmpString is None or tmpString=='None':
+                    # failed to find the selected item in the list
+                    self.selectedClassNameNumber=-1
+                else:
+                    self.selectedClassNameNumber=self.classNameLUT[tmpString]
+
+            curColourName=self.setColourRadioButton(selectedClassNameVar,selectedClassIdxList)
+            self.classListList.setCurrentItem(self.classListList.item(selectedClassIdxList))
+
+            self.comboBoxDefaultClass.setCurrentItem(self.comboBoxDefaultClass.item(0))
+            self.defaultClassNumber=0 #-1
+
+
+        # set default class (group) for all unclassified objects
+        if self.classFrameNames is None and self.classFrameColours is None:
+            self.setDefaultClass4objects()
+        else:
+            # it should already be set
+            pass
+
+        self.classListList.setSelectionMode(QAbstractItemView.SingleSelection)
+
+        self.classListList.currentItemChanged.connect(self.classListSelectionChanged)
+        self.lblCurrentClass.setText(f'<html>Current: <font color="{curColourName}">{self.classListList.currentItem().text()}</font></html>')
+
+        self.comboBoxDefaultClass.currentIndexChanged.connect(self.defaultClassSelectionChanged)
+
+        # set default class (group) for all unclassified objects
+        if self.classFrameNames is None and self.classFrameColours is None:
+            self.setDefaultClass4objects()
+        else:
+            # it should already be set
+            pass
+
+
+        self.classMainVBox=QVBoxLayout()
+        self.classHeaderHBox=QHBoxLayout()
+        self.classContentHBox=QHBoxLayout()
+        self.classRightVBox=QVBoxLayout()
+        self.classRightHBox=QHBoxLayout()
+        self.classHeaderInnerLeftHBox=QHBoxLayout()
+        self.classHeaderInnerRightHBox=QHBoxLayout()
+
+        self.classHeaderInnerLeftHBox.addWidget(self.lblClasses)
+        # +/- buttons
+        self.classHeaderInnerLeftHBox.addWidget(self.btnAddClass)
+        self.classHeaderInnerLeftHBox.addWidget(self.btnDeleteClass)
+        self.classHeaderInnerRightHBox.addWidget(self.lblCurrentClass)
+        self.classContentHBox.addWidget(self.classListList)
+        self.classRightVBox.addWidget(self.rdbtnGroup)
+        self.classRightHBox.addWidget(self.lblClassDefault)
+        self.classRightHBox.addWidget(self.comboBoxDefaultClass)
+
+        self.classHeaderHBox.addLayout(self.classHeaderInnerLeftHBox)
+        self.classHeaderInnerRightHBox.setAlignment(Qt.AlignRight)
+        self.classHeaderHBox.addLayout(self.classHeaderInnerRightHBox)
+        self.classContentHBox.setAlignment(Qt.AlignTop)
+        self.classContentHBox.addLayout(self.classRightVBox)
+        self.classRightVBox.addLayout(self.classRightHBox)
+        self.classMainVBox.addLayout(self.classHeaderHBox)
+        #self.classMainVBox.addLayout(self.classRightVBox)
+        self.classMainVBox.addLayout(self.classContentHBox)
+
+        #self.classesFrame.setLayout(self.classMainVBox)
+        #self.classesFrame.show()
+        self.setLayout(self.classMainVBox)
+        #self.show()
+        self.viewer.window.add_dock_widget(self,name='Classes')
+
+
+    def addNewClass(self):
+        # add new class to list
+        lastClassName=self.classFrameNames[-1]
+        lastClassNum=-1
+        if lastClassName is None:
+            lastClassNum=len(self.classNameLUT)
+        else:
+            lastClassNum=int(lastClassName[lastClassName.index("_")+1:len(lastClassName)])
+        
+        lastClassNum=-1
+        for key in self.classNameLUT:
+            tmpClassNum=self.classNameLUT[key]
+            lastClassNum=tmpClassNum if tmpClassNum>lastClassNum else lastClassNum
+
+        newClassName='Class_{:02d}'.format(lastClassNum+1)
+        self.classFrameNames.append(newClassName)
+        self.listModelClasses.append(newClassName)
+        self.classListList.addItem(newClassName) # insert item to the end of the list
+        self.comboBoxDefaultClass.addItem(newClassName)
+
+        #classNameLUT.put(newClassName,classNameLUT.size()+1); # <-- if loaded and classes are not numbered from 1, this will mess the numbering up
+        self.classNameLUT[newClassName]=lastClassNum+1
+
+        # assign a free colour to the new class
+        if len(self.classFrameNames)<=8:
+            for i in range(8):
+                if not (i in self.classFrameColours):
+                    # found first free colour, take it
+                    self.classFrameColours.append(i)
+                    break
+        else:
+            # assign the first colour
+            self.classFrameColours.append(0)
+
+
+    def deleteClass(self):
+        # TODO
+        return
+
+
+    # class list change listener
+    def classListSelectionChanged(self,item):
+        '''
+        print(f'selected class: {item.text()}')
+        curColourName=self.getCurColourName()
+        self.lblCurrentClass.setText(f'<html>Current: <font color="{curColourName}">{item.text()}</font></html>')
+        '''
+        
+        selectedClassNameIdx=self.classListList.currentRow()
+        selectedClassNameVar=''
+
+        self.classListSelectionHappened=True
+
+        if selectedClassNameIdx<0:
+            # selection is empty
+            selectedClassNameVar=None
+        else:
+            selectedClassNameVar=self.listModelClasses[selectedClassNameIdx]
+            print(f'Selected class "{selectedClassNameVar}"')
+
+            # store currently selected class's number for ROI grouping
+            selectedClassNameNumber=self.classNameLUT[selectedClassNameVar]
+
+            # find its colour
+            
+            # find it in the classnames list
+            selectedClassIdxList=self.classFrameNames.index(selectedClassNameVar)
+            #debug:
+            print(f'({selectedClassIdxList+1}/{len(self.classFrameNames)}) classes')
+            if selectedClassIdxList<0:
+                # didnt find it
+                print('Could not find the newly selected class name in the list. Please try again.')
+                return
+            
+            # moved radio button setting to its own fcn
+            self.setColourRadioButton(selectedClassNameVar,selectedClassIdxList)
+
+        self.classListSelectionHappened=False
+
+
+    def getCurColourName(self):
+        return self.rdbtnGroup.currentText()
+
+
+    def classColourBtnChanged(self):
+        # TODO
+        rbText=self.rdbtnGroup.currentText()
+        print(f'selected class colour: "{rbText}" for class {self.classListList.currentItem().text()}')
+
+        # set vars according to radio buttons
+        selectedClassColourCode=-1
+        curColourName=None
+        if rbText=='Red':
+            selectedClassColourCode=0
+            curColourName='red'
+            self.selectedClassColourIdx='red'
+        elif rbText=='Green':
+            selectedClassColourCode=1
+            curColourName='green'
+            self.selectedClassColourIdx='green'
+        elif rbText=='Blue':
+            selectedClassColourCode=2
+            curColourName='blue'
+            self.selectedClassColourIdx='blue'
+        elif rbText=='Cyan':
+            selectedClassColourCode=3
+            curColourName='cyan'
+            self.selectedClassColourIdx='cyan'
+        elif rbText=='Magenta':
+            selectedClassColourCode=4
+            curColourName='magenta'
+            self.selectedClassColourIdx='magenta'
+        elif rbText=='Yellow':
+            selectedClassColourCode=5
+            curColourName='yellow'
+            self.selectedClassColourIdx='yellow'
+        elif rbText=='Orange':
+            selectedClassColourCode=6
+            curColourName='orange'
+            self.selectedClassColourIdx='orange'
+        elif rbText=='White':
+            selectedClassColourCode=7
+            curColourName='white'
+            self.selectedClassColourIdx='white'
+        elif rbText=='Black':
+            selectedClassColourCode=8
+            curColourName='black'
+            self.selectedClassColourIdx='black'
+        else:
+            print('Unexpected radio button value')
+
+        selectedClassName=self.classListList.currentItem().text()
+        # find it in the classnames list
+        selectedClassIdxList=self.classFrameNames.index(selectedClassName)
+        if (selectedClassIdxList<0):
+            # didnt find it
+            print("Could not find the currently selected class name in the list. Please try again.")
+            return
+
+        self.classFrameColours[selectedClassIdxList]=selectedClassColourCode
+        print("Set selected class (\""+selectedClassName+"\") colour to "+rbText)
+        # display currently selected class colour on the radiobuttons and label
+        self.lblCurrentClass.setText(f'<html>Current: <font color="{curColourName}">{selectedClassName}</font></html>')
+
+
+    # set radio button for class frame
+    def setColourRadioButton(self,className,classIdx):
+        if self is None:
+            # class selection frame is not opened
+            return
+
+        curColourIdx=self.classFrameColours[classIdx]
+        curColourName=None
+        #debug:
+        print(f'>>>coloridx: {curColourIdx}')
+
+        # set radio buttons
+        if curColourIdx==0:
+            self.rdbtnGroup.setCurrentIndex(curColourIdx)
+            curColourName='red'
+            self.selectedClassColourIdx='red'
+        elif curColourIdx==1:
+            self.rdbtnGroup.setCurrentIndex(curColourIdx)
+            curColourName='green'
+            self.selectedClassColourIdx='green'
+        elif curColourIdx==2:
+            self.rdbtnGroup.setCurrentIndex(curColourIdx)
+            curColourName='blue'
+            self.selectedClassColourIdx='blue'
+        elif curColourIdx==3:
+            self.rdbtnGroup.setCurrentIndex(curColourIdx)
+            curColourName='cyan'
+            self.selectedClassColourIdx='cyan'
+        elif curColourIdx==4:
+            self.rdbtnGroup.setCurrentIndex(curColourIdx)
+            curColourName='magenta'
+            self.selectedClassColourIdx='magenta'
+        elif curColourIdx==5:
+            self.rdbtnGroup.setCurrentIndex(curColourIdx)
+            curColourName='yellow'
+            self.selectedClassColourIdx='yellow'
+        elif curColourIdx==6:
+            self.rdbtnGroup.setCurrentIndex(curColourIdx)
+            curColourName='orange'
+            self.selectedClassColourIdx='orange'
+        elif curColourIdx==7:
+            self.rdbtnGroup.setCurrentIndex(curColourIdx)
+            curColourName='white'
+            self.selectedClassColourIdx='white'
+        elif curColourIdx==8:
+            self.rdbtnGroup.setCurrentIndex(curColourIdx)
+            curColourName='black'
+            self.selectedClassColourIdx='black'
+        else:
+            print('Unexpected radio button value')
+        
+        # display currently selected class colour on the radiobuttons and label
+        self.lblCurrentClass.setText(f'<html>Current: <font color="{curColourName}">{className}</font></html>')
+
+        print("(\""+className+"\")'s colour: "+curColourName)
+        return curColourName
+
+
+    def defaultClassSelectionChanged(self,idx):
+        # a default class was selected, assign all unassigned objects to this class
+
+        # first save current classes
+        '''
+        if self.started and self.classMode and (self.imageFromArgs): #&& managerList.size()>0))
+            # TODO: select current slice's rois
+            #managerList.set(currentSliceIdx-1,manager)
+            pass
+        '''
+
+        selectedClassName=self.comboBoxDefaultClass.currentText()
+        print(f'Selected "{selectedClassName}" as default class')
+        if selectedClassName=="(none)":
+            # set no defaults
+            self.defaultClassNumber=0 #-1
+        else:
+            # a useful class is selected
+            self.defaultClassNumber=self.classNameLUT[selectedClassName]
+
+            # set all unassigned objects to this class
+            self.runDefaultClassSetting4allSlices()
+
+            # show the latest opened roi stack again
+            if self.imageFromArgs: #(managerList!=null && managerList.size()>0)
+                #updateROImanager(managerList.get(currentSliceIdx-1),showCnt)
+                # TODO
+                pass
+
+
+    def setDefaultClass4objects(self):
+        # TODO
+        return
+        
+
+    def runDefaultClassSetting4allSlices(self):
+        # TODO
+        return
