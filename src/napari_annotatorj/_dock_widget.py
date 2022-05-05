@@ -2621,13 +2621,15 @@ class AnnotatorJ(QWidget):
             #self.chckbxStepThroughContours.setEnabled(False)
 
             # start the classes frame
-            self.classesFrame=ClassesFrame(self.viewer,self.bsize2,self.listModelClasses,self.classFrameNames,self.defaultClassNumber)
+            self.classesFrame=ClassesFrame(self.viewer,self)
 
         else:
             self.classMode=False
             print('Class mode cleared')
 
             self.chckbxContourAssist.setEnabled(True)
+            if self.classesFrame is not None:
+                self.viewer.window.remove_dock_widget(self.classesFrame)
             
 
 
@@ -2671,16 +2673,22 @@ class BackupROI():
 
 # new frame for classes when selecting the "Class mode" checkbox in the main frame
 class ClassesFrame(QWidget):
-    def __init__(self,napari_viewer,pbtnSize,pclassList,pclassFrameNames,pdefaultClassNumber):
+    def __init__(self,napari_viewer,annotatorjObj):
         super().__init__()
         self.viewer = napari_viewer
-        self.bsize=pbtnSize
+        self.annotatorjObj=annotatorjObj
 
         # check if there is opened instance of this frame
         # the main plugin is: 'napari-annotatorj: Annotator J'
-        if 'Classes' in self.viewer.window._dock_widgets:
-            # already opened
-            return
+        if self.annotatorjObj.classesFrame is not None:
+            # already inited once, load again
+            print('detected that Classes widget has already been initialized')
+            if self.annotatorjObj.classesFrame.isVisible():
+                print('Classes widget is visible')
+                return
+            else:
+                print('Classes widget is not visible')
+                # rebuild the widget
 
         #self.classesFrame=QWidget()
         #self.classesFrame.setWindowTitle('Classes')
@@ -2694,11 +2702,15 @@ class ClassesFrame(QWidget):
         });
         '''
 
-        self.classNameLUT={}
-        self.listModelClasses=pclassList
-        self.classFrameNames=pclassFrameNames
+        '''
+        self.bsize=self.annotatorjObj.bsize2
+        self.classNameLUT=self.annotatorjObj.classNameLUT
+        self.listModelClasses=self.annotatorjObj.listModelClasses
+        self.classFrameNames=self.annotatorjObj.classFrameNames
         self.classListSelectionHappened=False
-        self.defaultClassNumber=pdefaultClassNumber
+        self.defaultClassNumber=self.annotatorjObj.defaultClassNumber
+        self.defColour=self.annotatorjObj.defColour
+        '''
         
         self.lblClasses=QLabel('Classes')
         self.lblCurrentClass=QLabel('Current:')
@@ -2706,12 +2718,12 @@ class ClassesFrame(QWidget):
         self.btnAddClass=QPushButton('+')
         self.btnAddClass.setToolTip('Add a new class')
         self.btnAddClass.clicked.connect(self.addNewClass)
-        self.btnAddClass.setStyleSheet(f"max-width: {int(self.bsize/2)}px")
+        self.btnAddClass.setStyleSheet(f"max-width: {int(self.annotatorjObj.bsize2/2)}px")
 
         self.btnDeleteClass=QPushButton('-')
         self.btnDeleteClass.setToolTip('Delete current class')
         self.btnDeleteClass.clicked.connect(self.deleteClass)
-        self.btnDeleteClass.setStyleSheet(f"max-width: {int(self.bsize/2)}px")
+        self.btnDeleteClass.setStyleSheet(f"max-width: {int(self.annotatorjObj.bsize2/2)}px")
 
         self.classListList=QListWidget()
 
@@ -2727,7 +2739,6 @@ class ClassesFrame(QWidget):
         self.rdbtnGroup.addItem('White')
         self.rdbtnGroup.addItem('Black')
         
-        self.rdbtnGroup.currentIndexChanged.connect(self.classColourBtnChanged)
 
         # add default class option as a combo box
         self.lblClassDefault=QLabel('Default:')
@@ -2737,21 +2748,21 @@ class ClassesFrame(QWidget):
 
 
         curColourName='red'
-        if self.listModelClasses is None or len(self.listModelClasses)==0:
+        if self.annotatorjObj.listModelClasses is None or len(self.annotatorjObj.listModelClasses)==0:
             self.classListList.insertItem(0,'Class_01')
             self.classListList.insertItem(1,'Class_02')
-            self.listModelClasses=[]
-            self.listModelClasses.append('Class_01')
-            self.listModelClasses.append('Class_02')
-            self.classFrameColours=[0,1]
-            self.classFrameNames=['Class_01','Class_02']
+            self.annotatorjObj.listModelClasses=[]
+            self.annotatorjObj.listModelClasses.append('Class_01')
+            self.annotatorjObj.listModelClasses.append('Class_02')
+            self.annotatorjObj.classFrameColours=[0,1]
+            self.annotatorjObj.classFrameNames=['Class_01','Class_02']
 
-            self.selectedClassNameNumber=1
-            self.classListList.setCurrentItem(self.classListList.item(0))
+            self.annotatorjObj.selectedClassNameNumber=1
+            #self.classListList.setCurrentItem(self.classListList.item(0))
 
             # set default roi group to 0
-            pluginInstance=AnnotatorJ(self.viewer)
-            roiLayer=pluginInstance.findROIlayer()
+            #pluginInstance=AnnotatorJ(self.viewer)
+            roiLayer=self.annotatorjObj.findROIlayer()
             for idx,roi in enumerate(roiLayer.data):
                 roiLayer.properties['class'][idx]=0
 
@@ -2761,36 +2772,34 @@ class ClassesFrame(QWidget):
 
             self.comboBoxDefaultClass.setCurrentIndex(0)
 
-            self.defaultClassNumber=0 #-1
+            self.annotatorjObj.defaultClassNumber=0 #-1
 
-            self.classNumberCounter=2
+            self.annotatorjObj.classNumberCounter=2
 
-            self.classNameLUT['Class_01']=1
-            self.classNameLUT['Class_02']=2
+            self.annotatorjObj.classNameLUT['Class_01']=1
+            self.annotatorjObj.classNameLUT['Class_02']=2
 
         else:
-            for idx,classi in enumerate(self.classListList):
-                self.classListList.insertItem(idx,classi)
-
             # set default class selection list
             self.comboBoxDefaultClass.addItem('(none)')
 
-            for i,el in enumerate(self.classFrameNames):
+            for i,el in enumerate(self.annotatorjObj.classFrameNames):
                 curClassName=el
                 if curClassName is None:
                     continue
-                self.listModelClasses.append(curClassName)
+                self.annotatorjObj.listModelClasses.append(curClassName)
                 self.comboBoxDefaultClass.addItem(curClassName)
+                self.classListList.insertItem(i,curClassName)
 
-                curClassNum=int(curClassName[curClassName.find("_")+1:-1])
-                print(f'classFrameNames.[i]: {classFrameNames[i]}, curClassNum: {curClassNum}')
-                print(self.classNameLUT)
+                curClassNum=int(curClassName[curClassName.find("_")+1:])
+                print(f'classFrameNames.[i]: {self.annotatorjObj.classFrameNames[i]}, curClassNum: {curClassNum}')
+                print(self.annotatorjObj.classNameLUT)
 
-                self.classNameLUT[{classFrameNames[i]}]=curClassNum
+                self.annotatorjObj.classNameLUT[self.annotatorjObj.classFrameNames[i]]=curClassNum
 
             # set selected colour for the previously selected class and colour
-            selectedClassNameVar='Class_{:02d}'.format(self.selectedClassNameNumber)
-            selectedClassIdxList=classFrameNames.index(selectedClassNameVar)
+            selectedClassNameVar='Class_{:02d}'.format(self.annotatorjObj.selectedClassNameNumber)
+            selectedClassIdxList=self.annotatorjObj.classFrameNames.index(selectedClassNameVar)
             if selectedClassIdxList==-1:
                 # could not find the selected class in the list e.g. if reimport didnt work well
                 print('Could not find the selected class in the list of classes, using the first.')
@@ -2799,19 +2808,21 @@ class ClassesFrame(QWidget):
                 tmpString=classListList.currentItem().text()
                 if tmpString is None or tmpString=='None':
                     # failed to find the selected item in the list
-                    self.selectedClassNameNumber=-1
+                    self.annotatorjObj.selectedClassNameNumber=-1
                 else:
-                    self.selectedClassNameNumber=self.classNameLUT[tmpString]
+                    self.annotatorjObj.selectedClassNameNumber=self.annotatorjObj.classNameLUT[tmpString]
 
             curColourName=self.setColourRadioButton(selectedClassNameVar,selectedClassIdxList)
             self.classListList.setCurrentItem(self.classListList.item(selectedClassIdxList))
 
-            self.comboBoxDefaultClass.setCurrentItem(self.comboBoxDefaultClass.item(0))
-            self.defaultClassNumber=0 #-1
+            self.comboBoxDefaultClass.setCurrentIndex(0)
+            self.annotatorjObj.defaultClassNumber=0 #-1
 
+
+        self.classListList.setCurrentItem(self.classListList.item(0))
 
         # set default class (group) for all unclassified objects
-        if self.classFrameNames is None and self.classFrameColours is None:
+        if self.annotatorjObj.classFrameNames is None and self.annotatorjObj.classFrameColours is None:
             self.setDefaultClass4objects()
         else:
             # it should already be set
@@ -2822,10 +2833,11 @@ class ClassesFrame(QWidget):
         self.classListList.currentItemChanged.connect(self.classListSelectionChanged)
         self.lblCurrentClass.setText(f'<html>Current: <font color="{curColourName}">{self.classListList.currentItem().text()}</font></html>')
 
+        self.rdbtnGroup.currentIndexChanged.connect(self.classColourBtnChanged)
         self.comboBoxDefaultClass.currentIndexChanged.connect(self.defaultClassSelectionChanged)
 
         # set default class (group) for all unclassified objects
-        if self.classFrameNames is None and self.classFrameColours is None:
+        if self.annotatorjObj.classFrameNames is None and self.annotatorjObj.classFrameColours is None:
             self.setDefaultClass4objects()
         else:
             # it should already be set
@@ -2869,42 +2881,101 @@ class ClassesFrame(QWidget):
 
     def addNewClass(self):
         # add new class to list
-        lastClassName=self.classFrameNames[-1]
+        lastClassName=self.annotatorjObj.classFrameNames[-1]
         lastClassNum=-1
         if lastClassName is None:
-            lastClassNum=len(self.classNameLUT)
+            lastClassNum=len(self.annotatorjObj.classNameLUT)
         else:
             lastClassNum=int(lastClassName[lastClassName.index("_")+1:len(lastClassName)])
         
         lastClassNum=-1
-        for key in self.classNameLUT:
-            tmpClassNum=self.classNameLUT[key]
+        for key in self.annotatorjObj.classNameLUT:
+            tmpClassNum=self.annotatorjObj.classNameLUT[key]
             lastClassNum=tmpClassNum if tmpClassNum>lastClassNum else lastClassNum
 
         newClassName='Class_{:02d}'.format(lastClassNum+1)
-        self.classFrameNames.append(newClassName)
-        self.listModelClasses.append(newClassName)
+        self.annotatorjObj.classFrameNames.append(newClassName)
+        self.annotatorjObj.listModelClasses.append(newClassName)
         self.classListList.addItem(newClassName) # insert item to the end of the list
         self.comboBoxDefaultClass.addItem(newClassName)
 
         #classNameLUT.put(newClassName,classNameLUT.size()+1); # <-- if loaded and classes are not numbered from 1, this will mess the numbering up
-        self.classNameLUT[newClassName]=lastClassNum+1
+        self.annotatorjObj.classNameLUT[newClassName]=lastClassNum+1
 
         # assign a free colour to the new class
-        if len(self.classFrameNames)<=8:
+        if len(self.annotatorjObj.classFrameNames)<=8:
             for i in range(8):
-                if not (i in self.classFrameColours):
+                if not (i in self.annotatorjObj.classFrameColours):
                     # found first free colour, take it
-                    self.classFrameColours.append(i)
+                    self.annotatorjObj.classFrameColours.append(i)
                     break
         else:
             # assign the first colour
-            self.classFrameColours.append(0)
+            self.annotatorjObj.classFrameColours.append(0)
 
 
     def deleteClass(self):
-        # TODO
-        return
+        # see if there are classes in the list
+
+        if self.classListList.count()>0:
+            # remove selected class from list
+            # fetch selected class from the list
+            selectedClassName=self.classListList.currentItem().text()
+            # find it in the classnames list
+            try:
+                selectedClassIdxList=self.annotatorjObj.classFrameNames.index(selectedClassName)
+            except ValueError as e:
+                # didnt find it
+                print(e)
+                print('Could not find the currently selected class name in the list for deletion. Please try again.')
+                return
+
+            self.annotatorjObj.classFrameNames.pop(selectedClassIdxList)
+            self.annotatorjObj.classFrameColours.pop(selectedClassIdxList)
+            self.annotatorjObj.listModelClasses.remove(selectedClassName)
+
+
+            # reset group attribute of all ROIs in this class if any
+            # set all currently assigned ROIs of this group to have the new contour colour
+            # loop through all slices
+            # TODO: when z-stack images are opened and annotated, the shapes layer is either multi-D or there are multiple shapes layers by slices; if so: loop the slices, run self.unClassifyClass(self.annotatorjObj.classNameLUT[selectedClassName]) and update the roi manager/layer and its visibility if needed; else: just this command is needed to run once
+            self.unClassifyClass(self.annotatorjObj.classNameLUT[selectedClassName])
+            
+            # see if the default class is being deleted
+            if self.annotatorjObj.defaultClassNumber==self.annotatorjObj.classNameLUT[selectedClassName]:
+                # reset the default class to (none)
+                print('>>>> deleting the default class --> unclassify these ROIs')
+                self.comboBoxDefaultClass.setCurrentText('(none)')
+                #unClassifyClass(defaultClassNumber);
+                self.annotatorjObj.defaultClassNumber=0 #-1
+                self.defaultClassColour=None
+
+            #comboBoxDefaultClass.removeItemAt(selectedClassIdxList+1); # default class selector has "(none)" as the first element
+            self.comboBoxDefaultClass.removeItem(self.comboBoxDefaultClass.findText(selectedClassName))
+            self.classListList.takeItem(self.classListList.row(self.classListList.currentItem()))
+
+            print(f'Deleted class "{selectedClassName}" from the class list')
+
+            # select the first class as default
+            if self.classListList.count()>0:
+                self.classListList.setCurrentRow(0)
+                selectedClassNameVar=self.annotatorjObj.listModelClasses[0]
+                print(f'Selected class "{selectedClassNameVar}"')
+
+                # store currently selected class's number for ROI grouping
+                self.annotatorjObj.selectedClassNameNumber=int(selectedClassNameVar[selectedClassNameVar.find("_")+1:])
+                self.selectedClassIdxList=self.annotatorjObj.classFrameNames.index(selectedClassNameVar)
+
+                self.setColourRadioButton(selectedClassNameVar,self.selectedClassIdxList)
+            else:
+                # deleted the last class
+                # allow this?
+                pass
+
+
+        else:
+            # no classes in the list
+            print('No classes left to delete.')
 
 
     # class list change listener
@@ -2924,18 +2995,18 @@ class ClassesFrame(QWidget):
             # selection is empty
             selectedClassNameVar=None
         else:
-            selectedClassNameVar=self.listModelClasses[selectedClassNameIdx]
+            selectedClassNameVar=self.annotatorjObj.listModelClasses[selectedClassNameIdx]
             print(f'Selected class "{selectedClassNameVar}"')
 
             # store currently selected class's number for ROI grouping
-            selectedClassNameNumber=self.classNameLUT[selectedClassNameVar]
+            self.annotatorjObj.selectedClassNameNumber=self.annotatorjObj.classNameLUT[selectedClassNameVar]
 
             # find its colour
             
             # find it in the classnames list
-            selectedClassIdxList=self.classFrameNames.index(selectedClassNameVar)
+            selectedClassIdxList=self.annotatorjObj.classFrameNames.index(selectedClassNameVar)
             #debug:
-            print(f'({selectedClassIdxList+1}/{len(self.classFrameNames)}) classes')
+            print(f'({selectedClassIdxList+1}/{len(self.annotatorjObj.classFrameNames)}) classes')
             if selectedClassIdxList<0:
                 # didnt find it
                 print('Could not find the newly selected class name in the list. Please try again.')
@@ -2962,51 +3033,51 @@ class ClassesFrame(QWidget):
         if rbText=='Red':
             selectedClassColourCode=0
             curColourName='red'
-            self.selectedClassColourIdx='red'
+            self.annotatorjObj.selectedClassColourIdx='red'
         elif rbText=='Green':
             selectedClassColourCode=1
             curColourName='green'
-            self.selectedClassColourIdx='green'
+            self.annotatorjObj.selectedClassColourIdx='green'
         elif rbText=='Blue':
             selectedClassColourCode=2
             curColourName='blue'
-            self.selectedClassColourIdx='blue'
+            self.annotatorjObj.selectedClassColourIdx='blue'
         elif rbText=='Cyan':
             selectedClassColourCode=3
             curColourName='cyan'
-            self.selectedClassColourIdx='cyan'
+            self.annotatorjObj.selectedClassColourIdx='cyan'
         elif rbText=='Magenta':
             selectedClassColourCode=4
             curColourName='magenta'
-            self.selectedClassColourIdx='magenta'
+            self.annotatorjObj.selectedClassColourIdx='magenta'
         elif rbText=='Yellow':
             selectedClassColourCode=5
             curColourName='yellow'
-            self.selectedClassColourIdx='yellow'
+            self.annotatorjObj.selectedClassColourIdx='yellow'
         elif rbText=='Orange':
             selectedClassColourCode=6
             curColourName='orange'
-            self.selectedClassColourIdx='orange'
+            self.annotatorjObj.selectedClassColourIdx='orange'
         elif rbText=='White':
             selectedClassColourCode=7
             curColourName='white'
-            self.selectedClassColourIdx='white'
+            self.annotatorjObj.selectedClassColourIdx='white'
         elif rbText=='Black':
             selectedClassColourCode=8
             curColourName='black'
-            self.selectedClassColourIdx='black'
+            self.annotatorjObj.selectedClassColourIdx='black'
         else:
             print('Unexpected radio button value')
 
         selectedClassName=self.classListList.currentItem().text()
         # find it in the classnames list
-        selectedClassIdxList=self.classFrameNames.index(selectedClassName)
+        selectedClassIdxList=self.annotatorjObj.classFrameNames.index(selectedClassName)
         if (selectedClassIdxList<0):
             # didnt find it
             print("Could not find the currently selected class name in the list. Please try again.")
             return
 
-        self.classFrameColours[selectedClassIdxList]=selectedClassColourCode
+        self.annotatorjObj.classFrameColours[selectedClassIdxList]=selectedClassColourCode
         print("Set selected class (\""+selectedClassName+"\") colour to "+rbText)
         # display currently selected class colour on the radiobuttons and label
         self.lblCurrentClass.setText(f'<html>Current: <font color="{curColourName}">{selectedClassName}</font></html>')
@@ -3018,7 +3089,7 @@ class ClassesFrame(QWidget):
             # class selection frame is not opened
             return
 
-        curColourIdx=self.classFrameColours[classIdx]
+        curColourIdx=self.annotatorjObj.classFrameColours[classIdx]
         curColourName=None
         #debug:
         print(f'>>>coloridx: {curColourIdx}')
@@ -3027,39 +3098,39 @@ class ClassesFrame(QWidget):
         if curColourIdx==0:
             self.rdbtnGroup.setCurrentIndex(curColourIdx)
             curColourName='red'
-            self.selectedClassColourIdx='red'
+            self.annotatorjObj.selectedClassColourIdx='red'
         elif curColourIdx==1:
             self.rdbtnGroup.setCurrentIndex(curColourIdx)
             curColourName='green'
-            self.selectedClassColourIdx='green'
+            self.annotatorjObj.selectedClassColourIdx='green'
         elif curColourIdx==2:
             self.rdbtnGroup.setCurrentIndex(curColourIdx)
             curColourName='blue'
-            self.selectedClassColourIdx='blue'
+            self.annotatorjObj.selectedClassColourIdx='blue'
         elif curColourIdx==3:
             self.rdbtnGroup.setCurrentIndex(curColourIdx)
             curColourName='cyan'
-            self.selectedClassColourIdx='cyan'
+            self.annotatorjObj.selectedClassColourIdx='cyan'
         elif curColourIdx==4:
             self.rdbtnGroup.setCurrentIndex(curColourIdx)
             curColourName='magenta'
-            self.selectedClassColourIdx='magenta'
+            self.annotatorjObj.selectedClassColourIdx='magenta'
         elif curColourIdx==5:
             self.rdbtnGroup.setCurrentIndex(curColourIdx)
             curColourName='yellow'
-            self.selectedClassColourIdx='yellow'
+            self.annotatorjObj.selectedClassColourIdx='yellow'
         elif curColourIdx==6:
             self.rdbtnGroup.setCurrentIndex(curColourIdx)
             curColourName='orange'
-            self.selectedClassColourIdx='orange'
+            self.annotatorjObj.selectedClassColourIdx='orange'
         elif curColourIdx==7:
             self.rdbtnGroup.setCurrentIndex(curColourIdx)
             curColourName='white'
-            self.selectedClassColourIdx='white'
+            self.annotatorjObj.selectedClassColourIdx='white'
         elif curColourIdx==8:
             self.rdbtnGroup.setCurrentIndex(curColourIdx)
             curColourName='black'
-            self.selectedClassColourIdx='black'
+            self.annotatorjObj.selectedClassColourIdx='black'
         else:
             print('Unexpected radio button value')
         
@@ -3085,19 +3156,19 @@ class ClassesFrame(QWidget):
         print(f'Selected "{selectedClassName}" as default class')
         if selectedClassName=="(none)":
             # set no defaults
-            self.defaultClassNumber=0 #-1
+            self.annotatorjObj.defaultClassNumber=0 #-1
         else:
             # a useful class is selected
-            self.defaultClassNumber=self.classNameLUT[selectedClassName]
+            self.annotatorjObj.defaultClassNumber=self.annotatorjObj.classNameLUT[selectedClassName]
 
             # set all unassigned objects to this class
             self.runDefaultClassSetting4allSlices()
 
             # show the latest opened roi stack again
-            if self.imageFromArgs: #(managerList!=null && managerList.size()>0)
+            #if self.imageFromArgs: #(managerList!=null && managerList.size()>0)
                 #updateROImanager(managerList.get(currentSliceIdx-1),showCnt)
                 # TODO
-                pass
+                #pass
 
 
     def setDefaultClass4objects(self):
@@ -3108,3 +3179,25 @@ class ClassesFrame(QWidget):
     def runDefaultClassSetting4allSlices(self):
         # TODO
         return
+
+
+    # unclassify all instances of currently selected class
+    def unClassifyClass(self,classNum):
+        #pluginInstance=AnnotatorJ(self.viewer)
+        roiLayer=self.annotatorjObj.findROIlayer()
+        n=len(roiLayer.data)
+        print(f'found {n} rois in class {classNum}')
+        for i in range(n):
+            # selectGroup selects all ROIs if none belong the the arg class classNum --> check again
+            if roiLayer.properties['class'][i]!=classNum:
+                continue
+
+            # --> unclassify it!
+            roiLayer.properties['class'][i]=0
+            roiLayer._data_view.update_face_color(i,[0,0,0,0])
+            roiLayer._data_view.update_edge_color(i,self.annotatorjObj.defColour) # this is the default contour colour
+
+            print(f'Selected "{roiLayer.properties["name"][i]}" ROI to unclassify (0)')
+
+        # deselect the current ROI so the true class colour contour can be shown
+        # no need, it doesn't get selected by default
