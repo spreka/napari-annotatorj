@@ -122,10 +122,14 @@ class AnnotatorJ(QWidget):
         self.selectedClassColourIdx=None
         self.classFrameNames=[]
         self.selectedClassNameNumber=-2
+        self.usedClassNameNumbers=[]
         self.defaultClassNumber=-1
         self.classNumberCounter=0
         self.classNameLUT={} # dict: string:int
         self.classFrameColours=[]
+
+        # get a list of the 9 basic colours also present in AnnotatorJ's class mode
+        self.colours=['red','green','blue','cyan','magenta','yellow','orange','white','black']
 
         # supported image formats
         self.imageExsts=['.png','.bmp','.jpg','.jpeg','.tif','.tiff']
@@ -746,12 +750,12 @@ class AnnotatorJ(QWidget):
         # find the unique class indexes
         classIdxs=numpy.unique(classes)
         # get a list of the 9 basic colours also present in AnnotatorJ's class mode
-        colours=['red','green','blue','cyan','magenta','yellow','orange','white','black']
+        #colours=['red','green','blue','cyan','magenta','yellow','orange','white','black']
         # TODO: add much more colours!
 
         self.classColourLUT={}
         for x in classIdxs:
-            self.classColourLUT.update({x:colours[x-1]}) # classes are only considered when class>0
+            self.classColourLUT.update({x:self.colours[x-1]}) # classes are only considered when class>0
 
     def rgb2Hex(self,rgb):
         # convert an array of rgb values to hex string representing colour
@@ -2472,6 +2476,127 @@ class AnnotatorJ(QWidget):
             return shapesLayer2
 
 
+    def classifyROI(self,layer,event):
+        if not self.classMode:
+            return
+        if layer.mode=='add_polygon':
+            msg='Cannot start classifying when {} is selected. Please select {}'.format(
+                '\'Add polygons(P)\'','\'Select shapes(5)\'')
+            warnings.warn(msg)
+            return
+        elif layer.mode!='select':
+            msg='Cannot start classifying. Please select {}'.format('\'Select shapes(5)\'')
+            warnings.warn(msg)
+            return
+
+        yield
+
+        # assign a class (group) to the selected ROI
+        if self.editMode or self.addAuto or self.inAssisting:
+            # cannot classify in edit mode
+            msg='Cannot classify objects if selected:\n edit mode\n contour assist\n add automatically'
+            warnings.warn(msg)
+            return
+
+        # find current image
+        imageLayer=self.findImageLayer()
+        if imageLayer is None:
+            print('No image layer found')
+            return
+        elif imageLayer.data is None:
+            print('No image opened')
+            return
+        else:
+            # we have an image
+            s=imageLayer.data.shape
+            self.imgSize=s
+
+            # get clicked coordinates relative to the source component
+            pos=layer.world_to_data(event.position)
+
+            if pos[0]<=0 or pos[1]<=0 or pos[0]>s[1] or pos[1]>s[0]:
+                print('(Class mode) not on the image')
+            else:
+                print('(Class mode) click on {}'.format(pos))
+
+                print(f'found {self.roiCount} rois')
+
+                # check if the user clicked on a shape
+                if len(layer.selected_data)>0:
+                    # clicked on a shape
+                    # get the index of the shape and remove the selection in one go
+                    curIdx=layer.selected_data.pop()
+                    print('Selected \'{}\' ROI for classification'.format(layer.properties['name'][curIdx]))
+                    # remove selection bbox around roi
+                    # simulate mouse move somewhere else
+                    # TODO!
+                    layer.mode='add_polygon'
+                    layer.mode='select'
+
+                    # fetch currently selected class info
+                    # currently selected class we used as group:
+                    curGroup=layer.properties['class'][curIdx]
+                    if curGroup==self.selectedClassNameNumber:
+                        # already in the target group
+                        # --> unclassify it!
+                        layer.properties['class'][curIdx]=0
+                        layer._data_view.update_face_color(curIdx,[0,0,0,0])
+                        layer._data_view.update_edge_color(curIdx,self.colourString2Float(self.defColour)) # this is the default contour colour
+                        
+                        print(f'Selected {layer.properties["name"][curIdx]} ROI to unclassify (0)')
+
+                    else:
+                        self.startedClassifying=True
+                        # store the current class name idx as group for saving check
+                        if not self.selectedClassNameNumber in self.usedClassNameNumbers:
+                            self.usedClassNameNumbers.append(self.selectedClassNameNumber)
+
+                        layer.properties['class'][curIdx]=self.selectedClassNameNumber
+                        # its colour:
+                        #debug:
+                        print(f'currently selected class colour: {self.selectedClassColourIdx}')
+                        layer._data_view.update_edge_color(curIdx,self.colourString2Float(self.selectedClassColourIdx))
+                        
+                        print(f'Selected {layer.properties["name"][curIdx]} ROI to class {self.selectedClassNameNumber}')
+
+                        #debug:
+                        checkColour=layer._data_view._edge_color[curIdx]
+                        print(f'set stroke color to: {self.getClassColourIdx(checkColour)}')
+
+                    # refresh text props
+                    layer.refresh()
+                    layer.refresh_text()
+                    #layer.mode='select'
+                    
+                else:
+                    # failed to find the currently clicked point's corresponding ROI
+                    print('Could not find the ROI associated with the selected point on the image.')
+
+
+    def colourString2Float(self,colourString):
+        self.colourFloats=[[1,0,0,1],[0,1,0,1],[0,0,1,1],[0,1,1,1],[1,0,1,1],[1,1,0,1],[1,0.65,0,1],[1,1,1,1],[0,0,0,1]]
+        curColourIdx=self.colours.index(colourString)
+        return self.colourFloats[curColourIdx]
+
+
+    # fetch class color idx from the classidxlist
+    def getClassColourIdx(self,curColour):
+        curColourIdx=-1
+
+        if curColour in numpy.array(self.colourFloats):
+            def checkElement(i,j):
+                return i==j
+            checkElementVectorized=numpy.vectorize(checkElement)
+            elementCheck=checkElementVectorized(curColour,self.colourFloats)
+            curColourIdx=[idx for idx,val in enumerate(elementCheck) if val.all()]
+            if curColourIdx is not None and len(curColourIdx)>0:
+                curColourIdx=curColourIdx[0]
+        else:
+            print('Unexpected Color, no matching class colour index')
+
+        return curColourIdx
+
+
     def setEditMode(self,state):
         shapesLayer=self.findROIlayer()
         if state == Qt.Checked:
@@ -2621,7 +2746,16 @@ class AnnotatorJ(QWidget):
             #self.chckbxStepThroughContours.setEnabled(False)
 
             # start the classes frame
+            #debug:
+            print(f'class list: {self.listModelClasses}')
+            print(f'selected col: {self.selectedClassColourIdx}')
             self.classesFrame=ClassesFrame(self.viewer,self)
+
+            # add mouse click callback to classify ROIs
+            if self.classifyROI not in shapesLayer.mouse_drag_callbacks:
+                shapesLayer.mouse_drag_callbacks.append(self.classifyROI)
+
+            shapesLayer.mode='select'
 
         else:
             self.classMode=False
@@ -2630,6 +2764,8 @@ class AnnotatorJ(QWidget):
             self.chckbxContourAssist.setEnabled(True)
             if self.classesFrame is not None:
                 self.viewer.window.remove_dock_widget(self.classesFrame)
+
+            shapesLayer.mode='add_polygon'
             
 
 
@@ -2748,6 +2884,7 @@ class ClassesFrame(QWidget):
 
 
         curColourName='red'
+        self.annotatorjObj.selectedClassColourIdx='red'
         if self.annotatorjObj.listModelClasses is None or len(self.annotatorjObj.listModelClasses)==0:
             self.classListList.insertItem(0,'Class_01')
             self.classListList.insertItem(1,'Class_02')
@@ -3171,14 +3308,51 @@ class ClassesFrame(QWidget):
                 #pass
 
 
+    # sets all objects with no currently assigned class (group) to the default class
     def setDefaultClass4objects(self):
-        # TODO
-        return
+        if not self.annotatorjObj.started or self.annotatorjObj.roiCount==0:
+            print("Cannot find objects for the current image")
+            return
+        elif self.annotatorjObj.defaultClassNumber<1:
+            print(f'Cannot set the default class to "{defaultClassNumber}". Must be >0.')
+            return
+
+        else:
+            selectedClassNameVar=None
+            # find its colour
+            selectedClassNameVar='Class_{:02d}'.format(self.annotatorjObj.defaultClassNumber)
+            tmpIdx=self.annotatorjObj.classFrameColours[self.annotatorjObj.classFrameNames.index(selectedClassNameVar)]
+            self.annotatorjObj.defaultClassColour=self.getClassColour(tmpIdx)
+            print(f'default class colour: {tmpIdx}')
+
+            roiLayer=self.annotatorjObj.findROIlayer()
+            n=len(roiLayer.data)
+
+            for i in range(n):
+                if roiLayer.properties['class'][i]<1:
+                    # unclassified ROI
+                    roiLayer.properties['class'][i]=self.annotatorjObj.defaultClassNumber
+                    roiLayer._data_view.update_edge_color(i,self.annotatorjObj.colourString2Float(self.annotatorjObj.defaultClassColour))
+            print(f'added them to the default class: {selectedClassNameVar}')
+
+            # refresh text props
+            roiLayer=self.annotatorjObj.findROIlayer()
+            roiLayer.refresh()
+            roiLayer.refresh_text()
         
 
+    # loops through all sclies of the stack and sets the default class for all objects in all roi sets
     def runDefaultClassSetting4allSlices(self):
-        # TODO
-        return
+        # save the latest opened roi stack internally
+        if self.annotatorjObj.started and self.annotatorjObj.classMode and self.annotatorjObj.imageFromArgs: #(managerList!=null and managerList.size()>0))
+            pass
+
+        # loop through all slices
+        if self.annotatorjObj.imageFromArgs: #(managerList!=null and managerList.size()>0){
+            # loop through them, then self.setDefaultClass4objects()
+            pass
+        else:
+            self.setDefaultClass4objects()
 
 
     # unclassify all instances of currently selected class
@@ -3195,9 +3369,41 @@ class ClassesFrame(QWidget):
             # --> unclassify it!
             roiLayer.properties['class'][i]=0
             roiLayer._data_view.update_face_color(i,[0,0,0,0])
-            roiLayer._data_view.update_edge_color(i,self.annotatorjObj.defColour) # this is the default contour colour
+            roiLayer._data_view.update_edge_color(i,self.annotatorjObj.colourString2Float(self.annotatorjObj.defColour)) # this is the default contour colour
 
             print(f'Selected "{roiLayer.properties["name"][i]}" ROI to unclassify (0)')
 
         # deselect the current ROI so the true class colour contour can be shown
         # no need, it doesn't get selected by default
+
+        # refresh text props
+        roiLayer=self.annotatorjObj.findROIlayer()
+        roiLayer.refresh()
+        roiLayer.refresh_text()
+
+
+    # fetch color from the classidxlist
+    def getClassColour(self,curColourIdx):
+        curColour=''
+        if curColourIdx==0:
+            curColour='red'
+        elif curColourIdx==1:
+            curColour='green'
+        elif curColourIdx==2:
+            curColour='blue'
+        elif curColourIdx==3:
+            curColour='cyan'
+        elif curColourIdx==4:
+            curColour='magenta'
+        elif curColourIdx==5:
+            curColour='yellow'
+        elif curColourIdx==6:
+            curColour='orange'
+        elif curColourIdx==7:
+            curColour='white'
+        elif curColourIdx==8:
+            curColour='black'
+        else:
+            print('Unexpected class colour index')
+
+        return curColour
