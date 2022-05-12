@@ -1,4 +1,13 @@
-from .unet.model import *
+# help the manual startup script import:
+try:
+    from .unet.model import *
+except ImportError as e:
+    try:
+        from unet.model import *
+    except Exception as e:
+        print(e)
+        exit()
+
 import skimage.io as io
 import cv2
 import numpy as np
@@ -82,7 +91,16 @@ def trainIfNoModel(args):
 
 	else:
 		# do training first
-		from .unet.data import trainGenerator
+		# help the manual startup script import:
+		try:
+		    from .unet.data import trainGenerator
+		except ImportError as e:
+		    try:
+		        from unet.data import trainGenerator
+		    except Exception as e:
+		        print(e)
+		        exit()
+		
 		data_gen_args = dict(rotation_range=0.2,
 							width_shift_range=0.05,
 							height_shift_range=0.05,

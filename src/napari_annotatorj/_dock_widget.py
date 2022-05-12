@@ -26,6 +26,9 @@ from copy import deepcopy
 #from napari.qt import create_worker #thread_worker
 from napari.qt.threading import thread_worker #create_worker
 
+# suppress numpy's FutureWarning: numpy\core\numeric.py:2449: FutureWarning: elementwise comparison failed; returning scalar instead, but in the future will perform elementwise comparison!
+warnings.filterwarnings('ignore', category=FutureWarning)
+
 
 class AnnotatorJ(QWidget):
     # your QWidget.__init__ can optionally request the napari viewer instance
@@ -1977,7 +1980,16 @@ class AnnotatorJ(QWidget):
                 return None
         #from .predict_unet import callPredictUnet,callPredictUnetLoaded,loadUnetModel
         #from .predict_unet import loadUnetModel
-        from .predict_unet import loadUnetModelSetGpu
+        # help the manual startup script import:
+        try:
+            from .predict_unet import loadUnetModelSetGpu
+        except ImportError as e:
+            try:
+                from predict_unet import loadUnetModelSetGpu
+            except Exception as e:
+                print(e)
+                return
+
         #model=loadUnetModel(os.path.join(self.modelFolder,self.modelJsonFile),importMode=importMode)
         model=loadUnetModelSetGpu(os.path.join(self.modelFolder,self.modelJsonFile),importMode=importMode,gpuSetting=self.gpuSetting)
         print('  >> importing done...')
@@ -2075,7 +2087,14 @@ class AnnotatorJ(QWidget):
 
 
         #from .predict_unet import callPredictUnet,callPredictUnetLoaded,loadUnetModel
-        from .predict_unet import callPredictUnet,callPredictUnetLoadedNoset,loadUnetModelSetGpu
+        try:
+            from .predict_unet import callPredictUnet,callPredictUnetLoadedNoset,loadUnetModelSetGpu
+        except ImportError as e:
+            try:
+                from predict_unet import callPredictUnet,callPredictUnetLoadedNoset,loadUnetModelSetGpu
+            except Exception as e:
+                print(e)
+                return
         # load trained unet model
         if self.trainedUNetModel is not None:
             # model already loaded
@@ -2530,8 +2549,10 @@ class AnnotatorJ(QWidget):
                     # remove selection bbox around roi
                     # simulate mouse move somewhere else
                     # TODO!
-                    layer.mode='add_polygon'
+                    '''
+                    layer.mode='transform'
                     layer.mode='select'
+                    '''
 
                     # fetch currently selected class info
                     # currently selected class we used as group:
@@ -2763,7 +2784,10 @@ class AnnotatorJ(QWidget):
 
             self.chckbxContourAssist.setEnabled(True)
             if self.classesFrame is not None:
-                self.viewer.window.remove_dock_widget(self.classesFrame)
+                try:
+                    self.viewer.window.remove_dock_widget(self.classesFrame)
+                except Exception as e:
+                    print(e)
 
             shapesLayer.mode='add_polygon'
             
@@ -3218,6 +3242,21 @@ class ClassesFrame(QWidget):
         print("Set selected class (\""+selectedClassName+"\") colour to "+rbText)
         # display currently selected class colour on the radiobuttons and label
         self.lblCurrentClass.setText(f'<html>Current: <font color="{curColourName}">{selectedClassName}</font></html>')
+
+        # set all currently assigned ROIs of this group to have the new contour colour
+        roiLayer=self.annotatorjObj.findROIlayer()
+        n=len(roiLayer.data)
+        print(f'self.annotatorjObj.selectedClassNameNumber: {self.annotatorjObj.selectedClassNameNumber}')
+        for i in range(n):
+            # selectGroup selects all ROIs if none belong the the arg class classNum --> check again
+            if roiLayer.properties['class'][i]!=self.annotatorjObj.selectedClassNameNumber:
+                continue
+
+            roiLayer._data_view.update_face_color(i,[0,0,0,0])
+            roiLayer._data_view.update_edge_color(i,self.annotatorjObj.colourString2Float(curColourName))
+
+        roiLayer.refresh()
+        roiLayer.refresh_text()
 
 
     # set radio button for class frame
