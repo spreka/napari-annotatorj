@@ -6,7 +6,7 @@ see: https://napari.org/docs/dev/plugins/hook_specifications.html
 
 Replace code below according to your needs.
 """
-from qtpy.QtWidgets import QWidget, QHBoxLayout,QVBoxLayout, QPushButton, QCheckBox,QLabel,QMessageBox,QFileDialog,QDialog,QComboBox,QListWidget,QAbstractItemView
+from qtpy.QtWidgets import QWidget, QHBoxLayout,QVBoxLayout, QPushButton, QCheckBox,QLabel,QMessageBox,QFileDialog,QDialog,QComboBox,QListWidget,QAbstractItemView,QLineEdit,QMenu,QRadioButton
 from magicgui import magic_factory
 
 import os
@@ -15,7 +15,7 @@ from roifile import ImagejRoi,ROI_TYPE,roiwrite
 from napari.layers import Shapes, Image, Labels
 import numpy
 from qtpy.QtCore import Qt,QSize,QRect
-from qtpy.QtGui import QPixmap
+from qtpy.QtGui import QPixmap,QCursor
 #from napari.layers.Shapes import mode
 from napari.layers.shapes import _shapes_key_bindings as key_bindings
 from napari.layers.shapes import _shapes_mouse_bindings as mouse_bindings
@@ -130,6 +130,8 @@ class AnnotatorJ(QWidget):
         self.classNumberCounter=0
         self.classNameLUT={} # dict: string:int
         self.classFrameColours=[]
+
+        self.ExportFrame=None
 
         # get a list of the 9 basic colours also present in AnnotatorJ's class mode
         self.colours=['red','green','blue','cyan','magenta','yellow','orange','white','black']
@@ -3446,3 +3448,224 @@ class ClassesFrame(QWidget):
             print('Unexpected class colour index')
 
         return curColour
+
+# -------------------------------------
+# end of class ClassesFrame
+# -------------------------------------
+
+
+# exporter frame
+class ExportFrame(QWidget):
+    def __init__(self,napari_viewer,annotatorjObj=None):
+        super().__init__()
+        self.viewer = napari_viewer
+        self.annotatorjObj=annotatorjObj
+
+        # check if there is opened instance of this frame
+        # the main plugin is: 'napari-annotatorj: Annotator J'
+        if self.annotatorjObj is not None and self.annotatorjObj.ExportFrame is not None:
+            # already inited once, load again
+            print('detected that Export widget has already been initialized')
+            if self.annotatorjObj.ExportFrame.isVisible():
+                print('Export widget is visible')
+                return
+            else:
+                print('Export widget is not visible')
+                # rebuild the widget
+
+
+
+        # browse buttons
+        self.btnBrowseOrig=QPushButton('Browse original ...')
+        self.btnBrowseOrig.setToolTip('Browse folder of original images')
+        self.btnBrowseOrig.clicked.connect(self.browseOriginal)
+        self.btnBrowseROI=QPushButton('Browse annot ...')
+        self.btnBrowseROI.setToolTip('Browse folder of annotation zip files')
+        self.btnBrowseROI.clicked.connect(self.browseROI)
+
+        # text fields
+        self.textFieldOrig=QLineEdit()
+        self.textFieldOrig.setToolTip('original images folder')
+        self.textFieldOrig.editingFinished.connect(self.browseOriginal)
+        self.textFieldROI=QLineEdit()
+        self.textFieldROI.setToolTip('annotation zips folder')
+        self.textFieldROI.editingFinished.connect(self.browseROI)
+
+        # export options
+        self.lblNewLabel=QLabel('Export options')
+        self.chckbxMultiLabel=QCheckBox('Multi-label (instances)')
+        self.chckbxMultiLabel.setChecked(True)
+        self.chckbxMultiLabel.setToolTip('Single 1-channel image with increasing labels for instances')
+        self.chckbxMultiLabel.stateChanged.connect(self.setMultiLabel)
+        self.chckbxMultiLayer=QCheckBox('Multi-layer (stack)')
+        self.chckbxMultiLayer.setToolTip('Single image (stack) with separate layers for instances')
+        self.chckbxMultiLayer.stateChanged.connect(self.setMultiLayer)
+        self.chckbxSemantic=QCheckBox('Semantic (binary)')
+        self.chckbxSemantic.setToolTip('Single binary image (foreground-background)')
+        self.chckbxSemantic.stateChanged.connect(self.setSemantic)
+
+        self.chckbxCoordinates=QCheckBox('Coordinates')
+        self.chckbxCoordinates.setToolTip('Bounding box coordinates')
+        self.chckbxCoordinates.stateChanged.connect(self.setCoordinates)
+        #add right click menu to choose bbox format: COCO/YOLO
+        self.chckbxCoordinates.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.chckbxCoordinates.customContextMenuRequested.connect(self.addCoordsContextMenu)
+
+        self.chckbxOverlay=QCheckBox('Overlay')
+        self.chckbxOverlay.setToolTip('Annotations overlayed as outlines on the original image')
+        self.chckbxOverlay.stateChanged.connect(self.setOverlay)
+
+
+        # annot options
+        self.lblObjectToExport=QLabel('Object to export')
+        self.rdbtnRoi=QRadioButton('ROI')
+        self.rdbtnRoi.setChecked(True)
+        self.rdbtnRoi.toggled.connect(self.setAnnotRoi)
+        self.rdbtnSemantic=QRadioButton('semantic')
+        self.rdbtnSemantic.toggled.connect(self.setAnnotSemantic)
+        self.rdbtnBoundingBox=QRadioButton('bounding box')
+        self.rdbtnBoundingBox.toggled.connect(self.setAnnotBbox)
+
+
+        # export buttons
+        self.btnExportMasks=QPushButton('Export masks')
+        self.btnExportMasks.setToolTip('Start exporting mask images')
+        self.btnExportMasks.clicked.connect(self.startExport)
+        self.btnCancel=QPushButton('Cancel')
+        self.btnCancel.clicked.connect(self.cancelExport)
+
+
+        self.ExportMainVBox=QVBoxLayout()
+        self.ExportHeaderVBox=QVBoxLayout()
+        self.ExportContentHBox=QHBoxLayout()
+        self.ExportHeaderUpperHBox=QHBoxLayout()
+        self.ExportHeaderLowerVBox=QVBoxLayout()
+        self.ExportContentLeftVBox=QVBoxLayout()
+        self.ExportContentRightVBox=QVBoxLayout()
+        self.ExportContentRightObjVBox=QVBoxLayout()
+        self.ExportContentLeftButtonHBox=QHBoxLayout()
+
+        # add browse elements to self.ExportHeaderVBox
+        self.ExportHeaderVBox.addWidget(self.textFieldOrig)
+        self.ExportHeaderVBox.addWidget(self.textFieldROI)
+        # add browse elements to self.ExportHeaderLowerVBox
+        self.ExportHeaderLowerVBox.addWidget(self.btnBrowseOrig)
+        self.ExportHeaderLowerVBox.addWidget(self.btnBrowseROI)
+
+        # add label + checkboxes to self.ExportContentLeftVBox
+        self.ExportContentLeftVBox.addWidget(self.lblNewLabel)
+        self.ExportContentLeftVBox.addWidget(self.chckbxMultiLabel)
+        self.ExportContentLeftVBox.addWidget(self.chckbxMultiLayer)
+        self.ExportContentLeftVBox.addWidget(self.chckbxSemantic)
+        self.ExportContentLeftVBox.addWidget(self.chckbxCoordinates)
+        self.ExportContentLeftVBox.addWidget(self.chckbxOverlay)
+
+        # add label + radio buttons to self.ExportContentRightObjVBox
+        self.ExportContentRightObjVBox.addWidget(self.lblObjectToExport)
+        self.ExportContentRightObjVBox.addWidget(self.rdbtnRoi)
+        self.ExportContentRightObjVBox.addWidget(self.rdbtnSemantic)
+        self.ExportContentRightObjVBox.addWidget(self.rdbtnBoundingBox)
+
+        # add buttons to self.ExportContentLeftButtonHBox
+        self.ExportContentLeftButtonHBox.addWidget(self.btnCancel)
+        self.ExportContentLeftButtonHBox.addWidget(self.btnExportMasks)
+
+
+        self.ExportContentRightObjVBox.setAlignment(Qt.AlignTop)
+        self.ExportContentRightVBox.setAlignment(Qt.AlignRight)
+
+        self.ExportContentRightVBox.addLayout(self.ExportContentRightObjVBox)
+        self.ExportContentRightVBox.addLayout(self.ExportContentLeftButtonHBox)
+
+        self.ExportHeaderUpperHBox.addLayout(self.ExportHeaderVBox)
+        self.ExportHeaderUpperHBox.addLayout(self.ExportHeaderLowerVBox)
+        #self.ExportHeaderVBox.addLayout(self.ExportHeaderUpperHBox)
+        #self.ExportHeaderVBox.addLayout(self.ExportHeaderLowerVBox)
+
+        self.ExportContentHBox.addLayout(self.ExportContentLeftVBox)
+        self.ExportContentHBox.addLayout(self.ExportContentRightVBox)
+        
+        self.ExportMainVBox.addLayout(self.ExportHeaderUpperHBox)
+        self.ExportMainVBox.addLayout(self.ExportContentHBox)
+
+        self.setLayout(self.ExportMainVBox)
+        #self.show()
+
+        if self.annotatorjObj is not None:
+            self.viewer.window.add_dock_widget(self,name='Export')
+
+
+
+    def browseOriginal(self):
+        # TODO
+        return
+
+    def browseROI(self):
+        # TODO
+        return
+
+    def setMultiLabel(self):
+        # TODO
+        return
+
+    def setMultiLayer(self):
+        # TODO
+        return
+
+    def setSemantic(self):
+        # TODO
+        return
+
+    def setCoordinates(self):
+        # TODO
+        return
+
+    def addCoordsContextMenu(self):
+        coordsContextMenu=QMenu()
+        coco=coordsContextMenu.addAction('(default) COCO format')
+        coco.triggered.connect(self.setCoco)
+        yolo=coordsContextMenu.addAction('YOLO format')
+        yolo.triggered.connect(self.setYolo)
+        coordsContextMenu.exec_(QCursor.pos())
+
+
+    def setCoco(self):
+        self.chckbxCoordinates.setText('Coordinates (COCO)')
+        self.bboxFormat=0
+        print('COCO selected')
+
+    def setYolo(self):
+        self.chckbxCoordinates.setText('Coordinates (YOLO)')
+        self.bboxFormat=1
+        print('YOLO selected')
+
+
+    def setOverlay(self):
+        # TODO
+        return
+
+
+    def setAnnotRoi(self):
+        # TODO
+        return
+
+    def setAnnotSemantic(self):
+        # TODO
+        return
+
+    def setAnnotBbox(self):
+        # TODO
+        return
+
+
+    def startExport(self):
+        # TODO
+        return
+
+    def cancelExport(self):
+        # TODO
+        return
+
+# -------------------------------------
+# end of class ExportFrame
+# -------------------------------------

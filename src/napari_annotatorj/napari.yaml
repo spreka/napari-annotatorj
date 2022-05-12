@@ -11,6 +11,9 @@ contributions:
   - id: napari-annotatorj.write_labels
     title: Write Labels
     python_name: napari_annotatorj._writer:napari_write_labels
+  - id: napari-annotatorj.ExportFrame
+    title: Create Export widget
+    python_name: napari_annotatorj._dock_widget:ExportFrame
   readers:
   - command: napari-annotatorj.get_reader
     filename_patterns:
@@ -26,3 +29,5 @@ contributions:
   widgets:
   - command: napari-annotatorj.AnnotatorJ
     display_name: Annotator J
+  - command: napari-annotatorj.ExportFrame
+    display_name: Export
