@@ -272,7 +272,7 @@ class AnnotatorJ(QWidget):
 
         # add dummy buttons as spacers
         self.vBoxRightDummy.setAlignment(Qt.AlignTop)
-        self.vBoxRightDummy.addSpacing(54)
+        self.vBoxRightDummy.addSpacing(62)
         self.vBoxRightDummy.addWidget(self.btnExport)
         
         self.vBoxRightReal.setAlignment(Qt.AlignTop)
@@ -2590,6 +2590,7 @@ class AnnotatorJ(QWidget):
                     layer.refresh()
                     layer.refresh_text()
                     #layer.mode='select'
+                    layer._set_highlight(force=True)
                     
                 else:
                     # failed to find the currently clicked point's corresponding ROI
@@ -3474,11 +3475,32 @@ class ExportFrame(QWidget):
                 # rebuild the widget
 
 
+        # supported image formats
+        self.imageExsts=['.png','.bmp','.jpg','.jpeg','.tif','.tiff']
+        self.defDir=None
+        self.defFile=None
+        self.started=False
+        self.startedOrig=False
+        self.startedROI=False
+        self.curFileList=[]
+        self.annotExsts=['.zip','.tiff','.tif']
+        self.curROIList=[]
+        self.selectedObjectType='ROI'
+        self.finished=True
+        self.multiLabel=True
+        self.multiLayer=False
+        self.semantic=False
+        self.coordinates=False
+        self.overlay=False
+        self.bboxFormat=0; # COCO
+        self.exportDone=False
+        self.originalFolder=None
+        self.annotationFolder=None
 
         # browse buttons
         self.btnBrowseOrig=QPushButton('Browse original ...')
         self.btnBrowseOrig.setToolTip('Browse folder of original images')
-        self.btnBrowseOrig.clicked.connect(self.browseOriginal)
+        self.btnBrowseOrig.clicked.connect(self.browseOrig)
         self.btnBrowseROI=QPushButton('Browse annot ...')
         self.btnBrowseROI.setToolTip('Browse folder of annotation zip files')
         self.btnBrowseROI.clicked.connect(self.browseROI)
@@ -3486,10 +3508,10 @@ class ExportFrame(QWidget):
         # text fields
         self.textFieldOrig=QLineEdit()
         self.textFieldOrig.setToolTip('original images folder')
-        self.textFieldOrig.editingFinished.connect(self.browseOriginal)
+        self.textFieldOrig.editingFinished.connect(self.initializeOrigFolderOpening)
         self.textFieldROI=QLineEdit()
         self.textFieldROI.setToolTip('annotation zips folder')
-        self.textFieldROI.editingFinished.connect(self.browseROI)
+        self.textFieldROI.editingFinished.connect(self.initializeROIFolderOpening)
 
         # export options
         self.lblNewLabel=QLabel('Export options')
@@ -3530,7 +3552,7 @@ class ExportFrame(QWidget):
         # export buttons
         self.btnExportMasks=QPushButton('Export masks')
         self.btnExportMasks.setToolTip('Start exporting mask images')
-        self.btnExportMasks.clicked.connect(self.startExport)
+        self.btnExportMasks.clicked.connect(self.startExportProgress)
         self.btnCancel=QPushButton('Cancel')
         self.btnCancel.clicked.connect(self.cancelExport)
 
@@ -3595,30 +3617,158 @@ class ExportFrame(QWidget):
             self.viewer.window.add_dock_widget(self,name='Export')
 
 
+    def browseOrig(self):
+        # open folder loading dialog box
 
-    def browseOriginal(self):
-        # TODO
-        return
+        if self.started:
+            # check if there are rois added:
+            if not self.exportDone:
+                # check how far the current export has progressed
+                #self.closeActiveWindows(self.curFileIdx,len(self.curFileList))
+                pass
+
+        # open folder dialog
+        self.originalFolder=QFileDialog.getExistingDirectory(
+                self,"Select original image folder",
+                self.defDir,QFileDialog.ShowDirsOnly)
+
+        print(self.originalFolder)
+        if os.path.isdir(self.originalFolder):
+            print('Opened original image folder: {}'.format(self.originalFolder))
+            self.textFieldOrig.setText(self.originalFolder)
+        else:
+            print('Failed to open original image folder')
+            return
+
+        self.initializeOrigFolderOpening(self.originalFolder)
+
 
     def browseROI(self):
-        # TODO
-        return
+        if self.started:
+            # check if there are rois added:
+            if not self.exportDone:
+                # check how far the current export has progressed
+                #self.closeActiveWindows(self.curFileIdx,len(self.curFileList))
+                pass
 
-    def setMultiLabel(self):
-        # TODO
-        return
+        # open folder dialog
+        self.annotationFolder=QFileDialog.getExistingDirectory(
+                self,"Select annotation folder",
+                self.defDir,QFileDialog.ShowDirsOnly)
 
-    def setMultiLayer(self):
-        # TODO
-        return
+        print(self.annotationFolder)
+        if os.path.isdir(self.annotationFolder):
+            print('Opened annotation folder: {}'.format(self.annotationFolder))
+            self.textFieldROI.setText(self.annotationFolder)
+        else:
+            print('Failed to open annotation folder')
+            return
 
-    def setSemantic(self):
-        # TODO
-        return
+        self.initializeROIFolderOpening(self.annotationFolder)
 
-    def setCoordinates(self):
-        # TODO
-        return
+
+    def initializeOrigFolderOpening(self,originalFolder):
+        self.defDir=originalFolder
+
+
+        # get a list of files in the current directory
+        self.curFileList=[f for f in os.listdir(originalFolder) if os.path.isfile(os.path.join(originalFolder,f)) and os.path.splitext(f)[1] in self.imageExsts]
+        fileListCount=len(self.curFileList)
+
+        # check if there are correct files in the selected folder
+        if fileListCount<1:
+            print('No original image files found in current folder')
+            warnings.warn('Could not find original image files in selected folder')
+            self.started=False
+            return
+
+        print(f'Found {fileListCount} images in current folder')
+
+        self.startedOrig=True
+        if self.startedROI:
+            self.started=True
+
+
+    def initializeROIFolderOpening(self,annotationFolder):
+        # get a list of files in the current directory
+        listOfROIs=[f for f in os.listdir(annotationFolder) if os.path.isfile(os.path.join(annotationFolder,f)) and os.path.splitext(f)[1] in self.annotExsts]
+        ROIListCount=0
+        #String[] curFileList;
+
+        # get number of useful files
+        # see which object type is selected
+        annotNameReg=None
+        annotExt=None
+        if self.selectedObjectType=='ROI':
+            #
+            annotNameReg='_ROIs'
+            annotExt='.zip'
+        elif self.selectedObjectType=='semantic':
+            #
+            annotNameReg='_semantic'
+            annotExt='.tiff'
+        elif self.selectedObjectType=='bbox':
+            #
+            annotNameReg='_bboxes'
+            annotExt='.zip'
+        else:
+            #
+            pass
+
+        self.curROIList=[]
+        for i in range(len(listOfROIs)):
+            # new, for any type of object we support
+            curFileName=listOfROIs[i]
+            if os.path.splitext(curFileName)[1]==annotExt and annotNameReg in curFileName:
+                self.curROIList.append(curFileName)
+                ROIListCount+=1
+
+
+        # check if there are correct files in the selected folder
+        if ROIListCount<1:
+            print('No annotation files found in current folder')
+            warnings.warn('Could not find annotation files in selected folder')
+            self.started=False
+            return
+
+        print(f'Found {ROIListCount} annotation files in current folder')
+
+        self.startedROI=True
+        if self.startedOrig:
+            self.started=True
+
+
+    def setMultiLabel(self,state):
+        if state==Qt.Checked:
+            self.multiLabel=True
+            print('Multi-label (instances) selected')
+        else:
+            self.multiLabel=False
+            print('Multi-label (instances) cleared')
+
+    def setMultiLayer(self,state):
+        if state==Qt.Checked:
+            self.multiLayer=True
+            print('Multi-layer (stack) selected')
+        else:
+            self.multiLayer=False
+            print('Multi-layer (stack) cleared')
+
+    def setSemantic(self,state):
+        if state==Qt.Checked:
+            self.semantic=True
+            print('Semantic (binary) selected')
+        else:
+            self.semantic=False
+            print('Semantic (binary) cleared')
+
+    def setCoordinates(self,state):
+        if state==Qt.Checked:
+            self.coordinates=True
+            print('Coordinates selected')
+        else:
+            self.coordinates=False
+            print('Coordinates cleared')
 
     def addCoordsContextMenu(self):
         coordsContextMenu=QMenu()
@@ -3640,31 +3790,1061 @@ class ExportFrame(QWidget):
         print('YOLO selected')
 
 
-    def setOverlay(self):
-        # TODO
-        return
+    def setOverlay(self,state):
+        if state==Qt.Checked:
+            self.overlay=True
+            print('Overlay selected')
+        else:
+            self.overlay=False
+            print('Overlay cleared')
 
 
-    def setAnnotRoi(self):
-        # TODO
-        return
+    def setAnnotRoi(self,state):
+        if state==Qt.Checked:
+            # ROI object type selected, default
+            # set var for object
+            self.selectedObjectType='ROI'
+            print(f'Selected annotation object type: {self.selectedObjectType}')
 
-    def setAnnotSemantic(self):
-        # TODO
-        return
+            # enable all checkboxes
+            self.chckbxMultiLabel.setEnabled(True)
+            self.chckbxMultiLayer.setEnabled(True)
+            self.chckbxSemantic.setEnabled(True)
+            self.chckbxCoordinates.setEnabled(True)
+            self.chckbxOverlay.setEnabled(True)
+
+            self.initializeOrigFolderOpening(self.textFieldOrig.text())
+            self.initializeROIFolderOpening(self.textFieldROI.text())
+        else:
+            # handle in next button's selected option
+            pass
+
+    def setAnnotSemantic(self,state):
+        if state==Qt.Checked:
+            # semantic selected, set everything to semantic instead
+            # set var for object
+            self.selectedObjectType="semantic"
+            print(f'Selected annotation object type: {self.selectedObjectType}')
+
+            # enable all checkboxes
+            self.chckbxMultiLabel.setEnabled(True)
+            self.chckbxMultiLayer.setEnabled(True)
+            self.chckbxSemantic.setEnabled(True)
+            self.chckbxCoordinates.setEnabled(True)
+            self.chckbxOverlay.setEnabled(True)
+
+            self.initializeOrigFolderOpening(self.textFieldOrig.text())
+            self.initializeROIFolderOpening(self.textFieldROI.text())
+
+            warnings.warn('Semantic annotation type selected.\nExported images (instance, stack) might\ncontain multiple touching objects as one!')
+        else:
+            # handle in next button's selected option
+            pass
 
     def setAnnotBbox(self):
-        # TODO
-        return
+        if state==Qt.Checked:
+            # bbox selected, set everything to bbox instead
+            # set var for object
+            self.selectedObjectType="bbox"
+            print(f'Selected annotation object type: {self.selectedObjectType}')
+
+            # enable only coordinates checkbox
+            self.chckbxMultiLabel.setEnabled(False)
+            self.chckbxMultiLayer.setEnabled(False)
+            self.chckbxSemantic.setEnabled(False)
+            self.chckbxCoordinates.setEnabled(True)
+            self.chckbxOverlay.setEnabled(True)
+            # also reset the others to False
+            self.chckbxMultiLabel.setChecked(False)
+            self.chckbxMultiLayer.setChecked(False)
+            self.chckbxSemantic.setChecked(False)
+
+            self.initializeOrigFolderOpening(self.textFieldOrig.text())
+            self.initializeROIFolderOpening(self.textFieldROI.text())
+        else:
+            # handle in next button's selected option
+            pass
 
 
-    def startExport(self):
-        # TODO
+    def startExportProgress(self):
+        if not self.started:
+            print('Open an image and annotation folder first')
+            warnings.warn('Click Browse buttons to initialize folders')
+            return
+
+
+        # check that at least one export option is selected:
+        if not self.multiLabel and not self.multiLayer and not self.semantic and not self.coordinates and not self.overlay:
+            print('Select export option')
+            print('No export option is selected')
+            warnings.warn('Select at least one export option')
+            return
+
+        self.finished=False
+
+        # this doesnt work yet:
+        self.openExportProgressFrame()
+
+        self.viewer.window._status_bar._toggle_activity_dock(True)
+
+        # check if the folders have the same number of files
+        # check if every annotation file has a corresponding original image file
+        origFileCount=len(self.curFileList)
+        annotFileCount=len(self.curROIList)
+        self.skipFileList=[]
+        curAnnotType=None
+        if origFileCount!=annotFileCount:
+            print('Different number of files in folders')
+        else:
+            print('Same number of files in folders')
+
+        # set progressbar length
+        from napari.utils import progress
+        from time import sleep
+        #self.progressBar.setMaximum(annotFileCount)
+
+        # for annot time saving
+        # TODO later
+
+        #debug:
+        print(f'orig folder: {self.originalFolder}')
+        print(f'annot folder: {self.annotationFolder}')
+        print(f'origs: {self.curFileList}')
+        print(f'annots: {self.curROIList}')
+
+        print('---- starting export ----');
+        # check for annot file correspondance
+        with progress(range(len(self.curROIList))) as progressBar:
+            for i in progressBar:
+                sleep(0.1)
+                self.curAnnotFileName=self.curROIList[i]
+                progressText=f'({i}/{annotFileCount}): {self.curAnnotFileName}'
+                print(progressText)
+                progressBar.set_description(progressText)
+                #debug:
+                print(progressText)
+
+                # check if this file is in the skip list by being a multiple-annotated file
+                if self.curAnnotFileName in self.skipFileList:
+                    # should check if the skipped annot file matches another original file name better !!!!!!!!
+                    # TODO
+
+                    # it is, skip it
+                    print(f'skipping annotation file {self.curAnnotFileName}')
+                    #continue
+                    # without for loop, put the other steps in else below
+
+                else:
+                    curAnnotFileRaw=None
+                    # find annotation type by name:
+                    if '_ROIs' in self.curAnnotFileName:
+                        # roi file
+                        curAnnotFileRaw=self.curAnnotFileName[0:self.curAnnotFileName.find('_ROIs')]
+                        curAnnotType='ROI'
+                    elif '_bboxes' in self.curAnnotFileName:
+                        # bbox file
+                        curAnnotFileRaw=self.curAnnotFileName[0:self.curAnnotFileName.find('_bboxes')]
+                        curAnnotType='bbox'
+                    elif '_semantic' in self.curAnnotFileName:
+                        # semantic file
+                        curAnnotFileRaw=self.curAnnotFileName[0:self.curAnnotFileName.find('_semantic')]
+                        curAnnotType='binary'
+                    else:
+                        print(f'could not determine type of annotation file: {self.curAnnotFileName}')
+                        # use default ROI in this case
+                        print('using default annotation type: ROI')
+                        curAnnotType='ROI'
+                        curAnnotFileRaw=self.curAnnotFileName[0:self.curAnnotFileName.find('.')]
+
+
+                    # check if multiple annotation files exist for this image/annot file:
+                    multipleAnnots=False
+                    self.multipleList=[]
+                    for e in range(annotFileCount):
+                        if e==i:
+                            # current annot file
+                            continue
+                        else:
+                            tmpAnnotFileName=self.curROIList[e]
+                            tmpIdx=tmpAnnotFileName.find(curAnnotFileRaw)
+                            if tmpIdx==-1:
+                                # not found, continue
+                                pass
+                            else:
+                                # another annot file for this image found!
+                                # store this name or idx
+                                # TODO
+                                self.multipleList.append(e)
+                                multipleAnnots=True
+
+                    if multipleAnnots:
+                        # show dialog to choose which annotation file they want for the image
+                        # ask annotation type in dialog box
+                        self.multiNum=len(self.multipleList)
+                        self.annotNames=[]
+                        self.annotNames=[self.curAnnotFileName]
+                        for e in range(self.multiNum):
+                            self.annotNames.append(self.curROIList[self.multipleList[e]])
+
+                        self.annotNameChooserDialog=QDialog()
+                        self.annotNameChooserDialog.setModal(True)
+                        self.annotNameChooserDialog.setWindowTitle('Multiple instances found')
+
+                        annotNamesLabel=QLabel(f'Select which annotation file to use for {curAnnotFileRaw} :')
+                        self.annotNamesBox=QComboBox()
+                        for el in self.annotNames:
+                            self.annotNamesBox.addItem(el)
+                        self.annotNamesBox.setCurrentIndex(0)
+
+                        annotNamesOK=QPushButton('Ok')
+                        annotNamesOK.clicked.connect(self.okMultiSelection)
+                        annotNamesCancel=QPushButton('Cancel')
+                        annotNamesCancel.clicked.connect(self.cancelMultiSelection)
+
+                        boxLayout=QHBoxLayout()
+                        boxLayout.addWidget(annotNamesLabel)
+                        boxLayout.addWidget(self.annotNamesBox)
+                        boxLayout.addWidget(annotNamesOK)
+                        boxLayout.addWidget(annotNamesCancel)
+                        self.annotNameChooserDialog.setLayout(boxLayout)
+                        #self.annotNameChooserDialog.show()
+                        self.annotNameChooserDialog.exec()
+
+
+                    # find if its original image exists
+                    #Arrays.asList(curFileList).contains(curAnnotFileRaw);
+                    foundIt=False
+                    curOrigFileName=None
+                    for j in range(origFileCount):
+                        curOrigFileName=self.curFileList[j]
+                        curOrigFileNameRaw=curOrigFileName[0:curOrigFileName.find('.')]
+                        if curAnnotFileRaw==curOrigFileNameRaw:
+                            # found it
+                            foundIt=True
+                            break
+                        else:
+                            # continue searching
+                            pass
+
+                    if foundIt:
+                        # check annotation type:
+                        # so far only instance segmentation is supported
+                        if not curAnnotType=='ROI':
+                            # implemented now
+                            pass
+
+
+                        # ---------------------
+                        # call export function:
+                        # ---------------------
+                        self.startExport(self.curAnnotFileName,curAnnotFileRaw,curOrigFileName,annotFileCount,i,curAnnotType,progressBar)
+
+                    else:
+                        # no original image for it --> skip or throw error?
+                        # cannot generate mask for sure as we need the image dims to create a mask of the same size!
+                        print(f'No original image found for annotation file "{self.curAnnotFileName}" --> skipping it')
+                        print('---------------------')
+                        continue
+
+        print('---- finished export ----')
+        
+        #self.progressBar.setValue(annotFileCount)
+        
+        # finished every image in the folder
+        if hasattr(self,'btnOk') and hasattr(self,'btnCancelProgress') and hasattr(self,'lblExportingImages'):
+            self.btnOk.setEnabled(True)
+            self.btnCancelProgress.setEnabled(False)
+            self.lblExportingImages.setText('Finished exporting images')
+        
+        # save annot time in file
+        # TODO later
+
+        # make the progress bar activity panel invisible again
+        self.viewer.window._status_bar._toggle_activity_dock(False)
+
+        # when open functions finish:
+        self.started=True
+
+        # check export options
+        # call export function
+
+        self.finished=True
+        self.exportDone=True
+
+
+    def cancelMultiSelection(self):
+        # selection was cancelled --> abort
+        self.finished=True
+        self.exportDone=True
+        if hasattr(self,'btnOk') and hasattr(self,'btnCancelProgress') and hasattr(self,'lblExportingImages'):
+            self.lblExportingImages.setText('Exporting was cancelled')
+            self.btnOk.setEnabled(True)
+            self.btnCancelProgress.setEnabled(False)
+        self.annotNameChooserDialog.done(QDialog.Rejected)
         return
+
+    def okMultiSelection(self):
+        choiceIdx=self.annotNamesBox.currentIndex()
+
+        # add all other options to skipFileList
+        for c in range(self.multiNum+1):
+            if c==0:
+                # first item was the original name
+                self.skipFileList.append(self.curAnnotFileName)
+            else:
+                # any other item from the list
+                self.skipFileList.append(self.curROIList[self.multipleList[c-1]])
+
+        # can set selected file name now:
+        self.curAnnotFileName=self.annotNames[choiceIdx]
+        print(f'Selected annotation file: {self.curAnnotFileName}')
+        self.annotNameChooserDialog.done(QDialog.Accepted)
+
+
+    def startExport(self,curAnnotFileName,curAnnotFileRaw,curOrigFileName,annotFileCount,i,curAnnotType,progressBar):
+        # start a progress bar for logging
+
+        # ------------ for logging progress: -----------------
+        # (i+1/annotFileCount) <-- to log
+
+        # update file name tag on main window to check which image we are annotating
+        displayedName=curAnnotFileRaw
+        maxLength=20
+        # check how long the file name is (if it can be displayed)
+        nameLength=len(curAnnotFileRaw)
+        if nameLength>maxLength:
+            displayedName=f'{curAnnotFileRaw[0:maxLength-3]}...tiff'
+
+        # display this in the progress bar too:
+        # not yet
+        # set the labels and progress
+        if hasattr(self,'lblExportingImages'):
+            self.lblExportingImages.setText("Exporting images...")
+        if hasattr(self,'lblCurrentImage'):
+            self.lblCurrentImage.setText(f' ({i}/{annotFileCount}): {displayedName}')
+
+        # ------------- logging end -------------------------
+        
+        
+
+        # export
+        # ----------------------------------------------------------------
+        # instance segmentation
+
+        # create masks folder in current annotation folder
+        # create output folder with the class name
+        
+
+        dimensions=[]
+        width=0
+        height=0
+
+        shapesLayer=None
+
+        # this annotation file has a corresponding image
+        # read original image to get the dimensions of it:
+        origImage=skimage.io.imread(os.path.join(self.originalFolder,curOrigFileName))
+        if origImage is not None:
+            # read it successfully
+            # if it is opened by default, close the window after getting the size info from it
+            # dimensions is an array of (width, height, nChannels, nSlices, nFrames)
+            dimensions=origImage.shape
+            width=dimensions[0]
+            height=dimensions[1]
+        else:
+            print(f'Could not open original image: {curOrigFileName}')
+            warnings.warn('Could not open original image: {curOrigFileName}')
+            # allow to continue the processing?
+            # if not, close progressbar too
+
+            return
+
+
+        # check annot type first
+        if curAnnotType=='ROI' or curAnnotType=='bbox':
+            # only need to load the .zip file
+            try:
+                #debug:
+                print(os.path.join(self.annotationFolder,curAnnotFileName))
+                rois=ImagejRoi.fromfile(os.path.join(self.annotationFolder,curAnnotFileName))
+                shapesLayer=self.extractROIdataSimple(rois)
+            except Exception as e:
+                print(f'Failed to open ROI: {curAnnotFileName}');
+                warnings.warn('Failed to open ROI .zip file')
+                print(e)
+                return
+            print(f'Opened ROI: {curAnnotFileName}')
+
+        elif curAnnotType=='binary':
+            # need to convert the semantic binary image to rois
+            semdimensions
+            semwidth=0
+            semheight=0
+            semanticImage=skimage.io.imread(os.path.join(self.annotationFolder,curAnnotFileName))
+            if semanticImage is not None:
+                # read it successfully
+                # if it is opened by default, close the window after getting the size info from it
+                # dimensions is an array of (width, height, nChannels, nSlices, nFrames)
+                semdimensions=semanticImage.shape
+                semwidth=semdimensions[0]
+                semheight=semdimensions[1]
+                if semwidth!=width or semheight!=height:
+                    print(f'Inconsistent size of semantic annotation image: {curAnnotFileName}, skipping it')
+                    warnings.warn(f'Could not verify annotation image: {curAnnotFileName}')
+                    return
+
+                # create rois from it
+                masked=semanticImage>0
+                semanticRoi,hierarchy=cv2.findContours(masked.astype(numpy.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                if semanticRoi is not None:
+                    pass
+                else:
+                    print('semanticRoi is None')
+
+                roiProps={'name':['0001'],'class':[0],'nameInt':[1]}
+                roiTextProps={
+                    'text': '{nameInt}: ({class})',
+                    'anchor': 'center',
+                    'size': 10,
+                    'color': 'black',
+                    'visible':False
+                }
+                # add an empty shapes layer
+                shapesLayer=Shapes(data=numpy.array([[0,0],[1,1]]),shape_type='polygon',name='ROI',properties=roiProps,text=roiTextProps)
+                shapesLayer._data_view.remove(0)
+                if len(semanticROI)>1 and type(semanticROI) is tuple:
+                    # multiple rois in the roi --> split them!
+                    for idx,x in enumerate(semanticROI):
+                        if type(x) is tuple:
+                            x=x[0]
+                            shapesLayer.add_polygon(numpy.array(numpy.fliplr(numpy.squeeze(x))))
+                            shapesLayer.properties['class'][-1]=0
+                else:
+                    shapesLayer.add_polygon(semanticROI)
+                    shapesLayer.properties['class'][-1]=0
+
+            else:
+                print(f'Could not open original image: {curOrigFileName}')
+                warnings.warn(f'Could not open original image: {curOrigFileName}')
+                # allow to continue the processing?
+                # if not, close progressbar too
+
+                return
+
+        # check if there are annotated objects in the file:
+        roiCount=len(shapesLayer.data) if shapesLayer is not None else 0
+        print(f'annotated objects: {roiCount}')
+        if roiCount<1:
+            # this continue worked while this whole bunch of export code was in the EXPORT ------- for cycle
+            #continue;
+            return
+
+        # create mask image
+        # export a mask image from the rois
+        labels=shapesLayer.to_labels([width, height])
+        #labelLayer = self.viewer.add_labels(labels, name='labelled_mask')
+        #labelLayer.visible = False
+
+
+        # fill output mask image according to export type selected:
+        outputFileName=None
+        annotationFolder2=None
+        exportFolder=None
+        refreshMask=False
+
+        # collect class info from the ROIs if any
+        nonEmptyClassNameNumbers=[]
+        for r in range(roiCount):
+            # get r. instance
+            curROIgroup=shapesLayer.properties['class'][r]
+            if curROIgroup>0 and curROIgroup not in nonEmptyClassNameNumbers:
+                nonEmptyClassNameNumbers.append(curROIgroup)
+                #debug:
+                print(f'Nonempty class idx+= {curROIgroup}')
+        
+        exportFolderClass=None
+        outDir=None
+
+
+        # check export type selected
+        if self.multiLabel:
+            # labelled masks on single layer of mask
+
+            exportFolder='labelled_masks'
+
+            # labels is already in increasing label format
+
+            # create export folder:
+            annotationFolder2=self.createExportFolder(exportFolder)
+            # construct output file name:
+            outputFileName=os.path.join(annotationFolder2,curAnnotFileRaw+'.tiff')
+            # save output image:
+            toSave=deepcopy(labels)
+            toSave.astype('uint16')
+            self.saveExportedImage(toSave,outputFileName)
+
+            # also save class mask images if the ROIs have class info saved
+            for c in range(len(nonEmptyClassNameNumbers)):
+
+                curClassNum=nonEmptyClassNameNumbers[c]
+
+                # create export folder:
+                exportFolderClass=os.path.join(annotationFolder2,'Class_{:02d}'.format(curClassNum))
+
+                os.makedirs(exportFolderClass,exist_ok=True)
+                print(f'Created class output folder: {exportFolderClass}')
+
+                maskImage2=self.createClassMask(roiCount,curClassNum,shapesLayer,True,labels)
+                if maskImage2 is None:
+                    return
+
+                # construct output file name:
+                outputFileName=os.path.join(exportFolderClass,curAnnotFileRaw+'.tiff')
+
+                self.saveExportedImage(maskImage2,outputFileName)
+
+            refreshMask=True
+
+
+        if self.multiLayer:
+            # multi-layer stack mask
+
+            exportFolder='layered_masks'
+            ok=False
+
+            if refreshMask:
+                # create new empty mask
+                maskImage=deepcopy(labels)
+
+            # create stack image:
+            if roiCount>1:
+
+                stack=numpy.zeros((width,height,roiCount),dtype=bool)
+                try:
+                    color1=1
+                    vals=numpy.unique(maskImage)
+                    vals=numpy.delete(vals,numpy.where(vals==0))
+                    # start getting the objects from the annotation file
+                    for s in range(roiCount):
+                        # could already set the slices here instead of creating empty layers
+                        tmpSlice=numpy.zeros((width,height),dtype=bool)
+
+                        # get s. instance
+                        # set fill value
+                        tmpSlice[numpy.where(maskImage==vals[s])]=color1
+
+                        stack[:,:,s]=tmpSlice
+                    ok=True
+
+                except MemoryError as e:
+                    print('Out-of-memory error')
+                    #stack.trim()
+                    ok=False
+
+                if stack.shape[2]>1:
+                    maskImage=stack
+                
+
+                if not ok:
+                    maskImage=None
+                    print('Error creating stack image')
+                    return
+
+            # create export folder:
+            annotationFolder2=self.createExportFolder(exportFolder)
+            # construct output file name:
+            outputFileName=os.path.join(annotationFolder2,curAnnotFileRaw+'.tiff')
+            # save output image:
+            self.saveExportedImage(maskImage,outputFileName)
+
+            # also save class mask images if the ROIs have class info saved
+            for c in range(nonEmptyClassNameNumbers):
+
+                curClassNum=nonEmptyClassNameNumbers[c]
+
+                # create export folder:
+                exportFolderClass=os.path.join(annotationFolder2,'Class_{:02d}'.format(curClassNum))
+
+                os.makedirs(exportFolderClass,exist_ok=True)
+                print(f'Created class output folder: {exportFolderClass}')
+
+                maskImage2=self.createClassMaskStack(size,width,height,roiCount,curClassNum,shapesLayer,deepcopy(maskImage))
+                if maskImage2 is None:
+                    return
+
+                # construct output file name:
+                outputFileName=os.path.join(exportFolderClass,curAnnotFileRaw+'.tiff')
+
+                self.saveExportedImage(maskImage2, outputFileName)
+
+            refreshMask=True
+
+
+        if self.semantic:
+            # binary semantic segmentation image
+
+            exportFolder='binary_masks'
+
+            if refreshMask:
+                # create new empty mask
+                maskImage=deepcopy(labels)
+
+            maskImage.astype(bool)
+            maskImage[numpy.where(maskImage>0)]=1
+
+            # create export folder:
+            annotationFolder2=self.createExportFolder(exportFolder)
+            # construct output file name:
+            outputFileName=os.path.join(annotationFolder2,curAnnotFileRaw+'.tiff')
+            # save output image:
+            self.saveExportedImage(maskImage, outputFileName)
+
+            # also save class mask images if the ROIs have class info saved
+            for c in range(len(nonEmptyClassNameNumbers)):
+
+                curClassNum=nonEmptyClassNameNumbers[c]
+
+                # create export folder:
+                exportFolderClass=os.path.join(annotationFolder2,'Class_{:02d}'.format(curClassNum))
+
+                os.makedirs(exportFolderClass,exist_ok=True)
+                print(f'Created class output folder: {exportFolderClass}')
+
+                maskImage2=self.createClassMask(roiCount,curClassNum,shapesLayer,False,labels)
+                if maskImage2 is None:
+                    return
+
+                # construct output file name:
+                outputFileName=os.path.join(exportFolderClass,curAnnotFileRaw+'.tiff')
+
+                self.saveExportedImage(maskImage2,outputFileName)
+
+            refreshMask=True
+
+
+        if self.coordinates:
+            # bounding box coordinates of objects
+
+            exportFolder='bounding_box_coordinates'
+
+            # prepare a bbox array for export
+            bboxList=None
+
+            # check selected bounding box format
+            badBbox=False
+            if self.bboxFormat==0:
+                # COCO format, default
+                bboxList=self.fillBboxList(shapesLayer,roiCount)
+            elif self.bboxFormat==1:
+                # YOLO format
+                #TODO
+                bboxList=self.fillBboxListYOLO(shapesLayer,roiCount,width,height)
+            else:
+                # unknown case
+                print('Unknown bounding box format selected, please try again.')
+                badBbox=True
+
+            # start getting the objects from the annotation file
+            # moved to its own fcn fillBboxList();
+
+            if badBbox or bboxList is None:
+                print('Failed to create .csv file with bounding box coordinates.')
+                # return
+            else:
+                # can continue
+                pass
+
+            # create export folder:
+            annotationFolder2=self.createExportFolder(exportFolder)
+            # construct output file name:
+            outputFileName=os.path.join(annotationFolder2,curAnnotFileRaw+'.csv')
+            # save output csv:
+            # TODO: create fcn for this
+            if (bboxFormat==0):
+                self.saveExportedCSV(bboxList,outputFileName)
+            elif (bboxFormat==1):
+                self.saveExportedCSVyolo(bboxList,outputFileName)
+            #saveExportedImage(maskImage, outputFileName);
+
+            # also save class mask images if the ROIs have class info saved
+            for c in range(len(nonEmptyClassNameNumbers)):
+
+                curClassNum=nonEmptyClassNameNumbers[c]
+
+                # create export folder:
+                exportFolderClass=os.path.join(annotationFolder2,'Class_{:02d}'.format(curClassNum))
+
+                os.makedirs(exportFolderClass,exist_ok=True)
+                print(f'Created class output folder: {exportFolderClass}')
+
+                bboxList2=self.createClassCSV(roiCount,curClassNum,shapesLayer,width,height,bboxFormat)
+                if bboxList2 is None:
+                    return
+
+                # construct output file name:
+                outputFileName=os.path.join(exportFolderClass,curAnnotFileRaw+'.csv')
+
+                if (bboxFormat==0):
+                    self.saveExportedCSV(bboxList2,outputFileName)
+                elif (bboxFormat==1):
+                    self.saveExportedCSVyolo(bboxList2,outputFileName)
+
+            refreshMask=True
+
+
+        if self.overlay:
+            # outlines overlayed on original image
+
+            exportFolder='outlined_images'
+
+            # create export folder:
+            annotationFolder2=self.createExportFolder(exportFolder)
+            # construct output file name:
+            outputFileName=os.path.join(annotationFolder2,curAnnotFileRaw+'.tiff')
+            # save output image:
+            self.saveOutlinedImage(origImage,shapesLayer,roiCount,outputFileName)
+
+        
+        # measure time
+        # TODO: later
+
+
+        # finished this image
+        # not yet:
+        #progressBar.set_description(progressText) # i+1
+        progressBar.update(i+1)
+        if i==annotFileCount:
+            # finished every image in the folder
+            if hasattr(self,'btnOk') and hasattr(self,'btnCancelProgress') and hasattr(self,'lblExportingImages'):
+                self.btnOk.setEnabled(True)
+                self.btnCancelProgress.setEnabled(False)
+                self.lblExportingImages.setText('Finished exporting images')
+
+
+    def createExportFolder(self,exportFolder):
+        annotationFolder2=os.path.join(self.annotationFolder,exportFolder)
+        os.makedirs(annotationFolder2,exist_ok=True)
+        print(f'Created output folder: {annotationFolder2}')
+        return annotationFolder2
+
+
+    def createClassMask(self,roiCount,curClassNum,shapeLayer,useRealValue,labelArrayIn):
+        count=0
+        labelArray=deepcopy(labelArrayIn)
+        vals=numpy.unique(labelArray)
+        # remove the background value
+        vals=numpy.delete(vals,numpy.where(vals==0))
+        classArray=numpy.zeros_like(labelArray)
+
+        if len(vals)!=roiCount:
+            print('Inconsistent number of rois')
+            return None
+        # start getting the objects from the annotation file
+        for r in range(roiCount):
+            # get r. instance
+            # see if it belongs to the current class (group)
+            if shapeLayer.properties['class'][r]==curClassNum:
+                # this class
+                #debug:
+                print(f'using ROI #{r}')
+
+                # set fill value
+                fillValue=-1
+                if useRealValue:
+                    fillValue=shapeLayer.properties['nameInt'][r]
+                else:
+                    fillValue=1
+                classArray[numpy.where(labelArray==vals[r])]=fillValue
+
+        return classArray
+
+
+    def createClassMaskStack(self,width,height,roiCount,curClassNum,shapeLayer,labelArrayIn):
+        count=0
+        labelArray=deepcopy(labelArrayIn)
+
+        stack=numpy.zeros((width,height,roiCount),dtype=bool)
+
+        try:
+            color1=1
+            vals=numpy.unique(labelArrayIn)
+            vals=numpy.delete(vals,numpy.where(vals==0))
+            # start getting the objects from the annotation file
+            for s in range(roiCount):
+                # could already set the slices here instead of creating empty layers
+                tmpSlice=numpy.zeros((width,height),dtype=bool)
+                if tmpSlice is None:
+                    print(f'could not create layer {s}')
+                    return None
+
+                # get s. instance
+                # see if it belongs to the current class (group)
+                if shapeLayer.properties['class'][s]==curClassNum:
+                    # set fill value
+                    tmpSlice[numpy.where(labelArrayIn==vals[s])]=color1
+
+                stack[:,:,s]=tmpSlice
+            ok=True
+
+        except MemoryError as e:
+            print('Out-of-memory error')
+            #stack.trim()
+            ok=False
+
+        if not ok:
+            stack=None
+            print('Error creating stack image')
+            return None
+
+        return stack
+
+
+    def saveExportedImage(self,img,path):
+        if len(img.shape)==2:
+            skimage.io.imsave(path,img,check_contrast=False)
+        elif len(img.shape)>2:
+            # stack image
+            #import skimage.io.tifffile as tif
+            #tif.imsave(path,img, bigtiff=True)
+            #skimage.io.imsave(path,img,plugin='tifffile')
+            import tifffile
+            tifffile.write(path,img) #numpy.swapaxes(img,0,-1)
+        print('Saved exported image: {}'.format(path))
+        print('---------------------')
+
+
+    # COCO format: [x,y,w,h] --> top left (x,y) + width, height
+    def fillBboxList(self,shapeLayer,roiCount):
+        if shapeLayer is None or roiCount<1 or len(shapesLayer.data)!=roiCount:
+            print('Cannot find bounding boxes for export')
+            return None
+
+        bboxList=[]
+
+        # start getting the objects from the annotation file
+        for r in range(roiCount):
+            # get r. instance
+            bbox=shapeLayer.interaction_box(r)
+            # bbox is a 10x2 ndarray of bbox coords from upper-left corner
+            # [upper-left y,x], [middle-left y,x], [lower-left y,x], [lower middle y,x]
+            # [lower-right y,x], [middle-right y,x], [upper-right y,x], [upper middle y,x]
+            # [centre y,x], [rotation handle y,x]
+            # 0.: [y,x], 2. [height], 6. width
+            # get coordinates
+            x=round(bbox[0,1])
+            y=round(bbox[0,0])
+            w=round(bbox[6,1]-bbox[0,1])
+            h=round(bbox[2,0]-bbox[0,0])
+            bboxList.append([x,y,w,h])
+        return bboxList
+
+
+    # YOLO format: [class,x,y,w,h] normalized to [0,1] --> center (x,y) + width, height
+    def fillBboxListYOLO(self,shapeLayer,roiCount,width,height):
+        if shapeLayer is None or roiCount<1 or len(shapesLayer.data)!=roiCount:
+            print('Cannot find bounding boxes for export')
+            return None
+
+        bboxList=[]
+
+        # start getting the objects from the annotation file
+        for r in range(roiCount):
+            c=shapeLayer.properties['class'][r]
+            # get r. instance
+            bbox=shapeLayer.interaction_box(r)
+            # bbox is a 10x2 ndarray of bbox coords from upper-left corner
+            # [upper-left y,x], [middle-left y,x], [lower-left y,x], [lower middle y,x]
+            # [lower-right y,x], [middle-right y,x], [upper-right y,x], [upper middle y,x]
+            # [centre y,x], [rotation handle y,x]
+            # 0.: [y,x], 2. [height], 6. width
+            # get coordinates normalized to width and height, from the center point
+            y,x=bbox[8,:]
+            x=x/width
+            y=y/height
+            w=(bbox[6,1]-bbox[0,1])/width
+            h=(bbox[2,0]-bbox[0,0])/height
+            bboxList.append([c,x,y,w,h])
+        return bboxList
+
+
+    def saveExportedCSV(self,bboxes,outPath):
+        with open(outPath,'w',newline='') as csvFile:
+            csvWriter = csv.writer(csvFile, delimiter=',')
+            # write header
+            csvWriter.writerow(['x','y','width','height'])
+            for row in bboxes:
+                csvWriter.writerow(row)
+
+
+    def saveExportedCSVyolo(self,bboxes,outPath):
+        # YOLO data format: [class x_center y_center w h] normalized, white space delimited
+
+        if os.path.splitext(outPath)[1]==('.csv'):
+            outPath=outPath[0:-4]+'.txt'
+
+        with open(outPath,'w',newline='') as csvFile:
+            csvWriter = csv.writer(csvFile, delimiter=' ')
+            # write header
+            csvWriter.writerow(['class','x','y','width','height'])
+            for row in bboxes:
+                csvWriter.writerow(row)
+
+
+    def createClassCSV(self,roiCount,curClassNum,shapeLayer,imWidth,imHeight,bboxFormat):
+        # count the number of objects in the current class first --> create the bboxList of this size
+        thisClassCount=0
+        lineNum=0
+        # prepare a bbox array for export
+        bboxList=[]
+        for r in range(roiCount):
+            c=shapeLayer.properties['class'][r]
+            # see if it belongs to the current class (group)
+            if c==curClassNum:
+                thisClassCount+=1
+                # get coordinates
+                bbox=shapeLayer.interaction_box(r)
+                if bboxFormat==0:
+                    # COCO format, default
+                    x=round(bbox[0,1])
+                    y=round(bbox[0,0])
+                    w=round(bbox[6,1]-bbox[0,1])
+                    h=round(bbox[2,0]-bbox[0,0])
+                    bboxList.append([x,y,w,h])
+                elif bboxFormat==1:
+                    # YOLO format
+                    y,x=bbox[8,:]
+                    x=x/width
+                    y=y/height
+                    w=(bbox[6,1]-bbox[0,1])/width
+                    h=(bbox[2,0]-bbox[0,0])/height
+                    bboxList.append([c,x,y,w,h])
+
+                else:
+                    # unknown case
+                    print('Unknown bounding box format selected, please try again.')
+
+        if thisClassCount==0:
+            print(f'Class {curClassNum} contains 0 objects')
+            return None
+
+        return bboxList
+
+
+    # save current annotations as outlines on the original image
+    def saveOutlinedImage(self,image,shapeLayer,roiCount,outputFileName):
+        outImage=numpy.zeros((image.shape[0],image.shape[1],3),dtype=numpy.uint8)
+        rgb=False
+        if len(image.shape)==2:
+            # 2D image
+            for ch in range(3):
+                outImage[:,:,ch]=image
+        elif len(image.shape)==3:
+            # 2D RGB image
+            rgb=True
+
+        # LUT for class colours
+        classColours=[[1,0,0,1],[0,1,0,1],[0,0,1,1],[0,1,1,1],[1,0,1,1],[1,1,0,1],[1,0.65,0,1],[1,1,1,1],[0,0,0,1]]
+        # add some more colours
+        for i in range(len(classColours)):
+            classColours2[i]=[0.5*x for x in classColours[i]]
+        classColours=classColours+classColours2
+
+        # single mask image
+        #overlay=shapeLayer.to_labels(labels_shape=(image.shape[0],image.shape[1]))
+        #maskOutline=overlay-skimage.morphology.erosion(overlay,skimage.morphology.disk(1))
+
+        # multiple mask images by objects
+        overlays=shapeLayer.to_masks(mask_shape=(image.shape[0],image.shape[1]))
+        overlayed=deepcopy(image)
+
+        for r in range(roiCount):
+            c=shapeLayer.properties['class'][r]
+            curColour=classColours[c]
+            curColour=curColour[0:3] # trim alpha
+            maskOutlinex=numpy.bitwise_xor(overlays[r],skimage.morphology.erosion(overlays[r],skimage.morphology.disk(1)))
+            for ch in range(3):
+                overlayed[:, :, ch] = numpy.where(maskOutlinex[:, :] != 0, 255*curColour[ch], overlayed[:, :, ch])
+        skimage.io.imsave(outputFileName, overlayed)
+
 
     def cancelExport(self):
         # TODO
         return
+
+
+    def openExportProgressFrame(self):
+        # TODO
+        return
+
+
+    def closeActiveWindows(self,curFileIdx,curFileListLength):
+        # TODO
+        return
+
+
+    # mock a similar function to AnnotatorJ class' extractROIdata fcn
+    def extractROIdataSimple(self,rois):
+        # fetch the coordinates and other data from the ImageJ ROI.zip file already imported with the roifile package
+        # Inputs:
+        #   rois: list of ImageJ ROI objects
+        # Outputs:
+        #   shapesLayer: shapes layer created from the list of coordinates fetched from the input rois
+
+        roiList=[]
+        roiType='polygon' # default to this
+        defColour='white'
+
+        hasColour=False
+        roiColours=[]
+        roiProps={'name':[],'class':[],'nameInt':[]}
+        roiTextProps={
+            'text': '{nameInt}: ({class})',
+            'anchor': 'center',
+            'size': 10,
+            'color': 'black',
+            'visible':False
+        }
+
+        # loop through the rois
+        for curROI in rois:
+            xy=curROI.coordinates() # a list of (x,y) coordinates in the wrong order
+            yx=numpy.array([[y,x] for x,y in xy]) # swapping to (y,x) coordinates
+            roiList.append(yx)
+
+            # check roi type
+            if curROI.roitype==ROI_TYPE.FREEHAND:
+                # freehand roi drawn in instance annotation mode
+                roiType='polygon'
+            elif (curROI.roitype==ROI_TYPE.RECT and yx.shape[0]==4):
+                # rectangle drawn in bounding box annotation mode
+                roiType='rectangle'
+            else:
+                # leave at the default
+                roiType='polygon'
+
+            # check if it has group attribute used as class in AnnotatorJ
+            curClass=curROI.group
+            if curClass>0:
+                hasColour=True
+                # get class colour lut
+                curColour='white'
+                roiColours.append(curColour)
+                roiProps['class'].append(curClass)
+            else:
+                roiColours.append(defColour)
+                roiProps['class'].append(0)
+
+            # store the roi's name
+            roiProps['name'].append(curROI.name)
+            roiProps['nameInt'].append(int(curROI.name))
+
+            # TODO: fetch more data from the rois
+
+        # fill (face) colour of rois is transparent by default, only the contours are visible
+        # edge_width=0.5 actually sets it to 1
+        shapesLayer = Shapes(data=roiList,shape_type=roiType,name='ROI',edge_width=0.5,edge_color=roiColours,face_color=[0,0,0,0],properties=roiProps,text=roiTextProps)
+
+        return shapesLayer
 
 # -------------------------------------
 # end of class ExportFrame
