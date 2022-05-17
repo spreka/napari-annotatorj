@@ -28,6 +28,6 @@ contributions:
     display_name: labels
   widgets:
   - command: napari-annotatorj.AnnotatorJ
-    display_name: Annotator J
+    display_name: AnnotatorJ
   - command: napari-annotatorj.ExportFrame
-    display_name: Export
+    display_name: AnnotatorJExport

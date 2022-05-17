@@ -374,21 +374,21 @@ class AnnotatorJ(QWidget):
             if not self.imageFromArgs:
                 if self.stepping:
                     # concatenate file path with set new prev/next image name and open it without showing the dialog
-                    destNameRaw=os.path.join(self.defDir,self.defFile)
+                    self.destNameRaw=os.path.join(self.defDir,self.defFile)
                     self.stepping=False
                 else:
-                    destNameRaw,_=QFileDialog.getOpenFileName(
+                    self.destNameRaw,_=QFileDialog.getOpenFileName(
                         self,"Select an image",
                         str(os.path.join(self.defDir,self.defFile)),"Images (*.png *.bmp *.jpg *.jpeg *.tif *.tiff *.gif)")
 
-                print(destNameRaw)
-                if os.path.exists(destNameRaw):
-                    self.defDir=os.path.dirname(destNameRaw)
-                    self.defFile=os.path.basename(destNameRaw)
-                    img=skimage.io.imread(destNameRaw)
-                    print('Opened file: {}'.format(destNameRaw))
+                print(self.destNameRaw)
+                if os.path.exists(self.destNameRaw):
+                    self.defDir=os.path.dirname(self.destNameRaw)
+                    self.defFile=os.path.basename(self.destNameRaw)
+                    img=skimage.io.imread(self.destNameRaw)
+                    print('Opened file: {}'.format(self.destNameRaw))
                 else:
-                    print('Could not open file: {}'.format(destNameRaw))
+                    print('Could not open file: {}'.format(self.destNameRaw))
                     return
 
                 self.curPredictionImageName=self.defFile
@@ -989,7 +989,7 @@ class AnnotatorJ(QWidget):
         # set output file name according to annotation type:
         # TODO: add the others
         # now we only have instance
-        roiFileName=str(os.path.join(destMaskFolder2,'{}_ROIs.zip'.format(os.path.splitext(self.defFile)[0])))
+        roiFileName=str(os.path.join(destMaskFolder2,'{}_ROIs.zip'.format(os.path.splitext(os.path.basename(self.destNameRaw))[0])))
 
         # check if annotation already exists for this image with this class
         if os.path.exists(roiFileName):
@@ -997,7 +997,7 @@ class AnnotatorJ(QWidget):
             newFileNum=0
             while os.path.exists(roiFileName):
                 newFileNum+=1
-                roiFileName=str(os.path.join(destMaskFolder2,'{}_ROIs_{}.zip'.format(os.path.splitext(self.defFile)[0],newFileNum)))
+                roiFileName=str(os.path.join(destMaskFolder2,'{}_ROIs_{}.zip'.format(os.path.splitext(os.path.basename(self.destNameRaw))[0],newFileNum)))
 
         print('Set output ROI.zip name: {}'.format(roiFileName))
 
@@ -3912,13 +3912,12 @@ class ExportFrame(QWidget):
         print(f'origs: {self.curFileList}')
         print(f'annots: {self.curROIList}')
 
-        print('---- starting export ----');
+        print('---- starting export ----')
         # check for annot file correspondance
         with progress(range(len(self.curROIList))) as progressBar:
             for i in progressBar:
-                sleep(0.1)
                 self.curAnnotFileName=self.curROIList[i]
-                progressText=f'({i}/{annotFileCount}): {self.curAnnotFileName}'
+                progressText=f'({i+1}/{annotFileCount}): {self.curAnnotFileName}'
                 print(progressText)
                 progressBar.set_description(progressText)
                 #debug:
@@ -3931,6 +3930,7 @@ class ExportFrame(QWidget):
 
                     # it is, skip it
                     print(f'skipping annotation file {self.curAnnotFileName}')
+                    progressBar.update(1)
                     #continue
                     # without for loop, put the other steps in else below
 
@@ -3939,22 +3939,22 @@ class ExportFrame(QWidget):
                     # find annotation type by name:
                     if '_ROIs' in self.curAnnotFileName:
                         # roi file
-                        curAnnotFileRaw=self.curAnnotFileName[0:self.curAnnotFileName.find('_ROIs')]
+                        curAnnotFileRaw=self.curAnnotFileName[0:self.curAnnotFileName.rfind('_ROIs')]
                         curAnnotType='ROI'
                     elif '_bboxes' in self.curAnnotFileName:
                         # bbox file
-                        curAnnotFileRaw=self.curAnnotFileName[0:self.curAnnotFileName.find('_bboxes')]
+                        curAnnotFileRaw=self.curAnnotFileName[0:self.curAnnotFileName.rfind('_bboxes')]
                         curAnnotType='bbox'
                     elif '_semantic' in self.curAnnotFileName:
                         # semantic file
-                        curAnnotFileRaw=self.curAnnotFileName[0:self.curAnnotFileName.find('_semantic')]
+                        curAnnotFileRaw=self.curAnnotFileName[0:self.curAnnotFileName.rfind('_semantic')]
                         curAnnotType='binary'
                     else:
                         print(f'could not determine type of annotation file: {self.curAnnotFileName}')
                         # use default ROI in this case
                         print('using default annotation type: ROI')
                         curAnnotType='ROI'
-                        curAnnotFileRaw=self.curAnnotFileName[0:self.curAnnotFileName.find('.')]
+                        curAnnotFileRaw=self.curAnnotFileName[0:self.curAnnotFileName.rfind('.')]
 
 
                     # check if multiple annotation files exist for this image/annot file:
@@ -4017,7 +4017,7 @@ class ExportFrame(QWidget):
                     curOrigFileName=None
                     for j in range(origFileCount):
                         curOrigFileName=self.curFileList[j]
-                        curOrigFileNameRaw=curOrigFileName[0:curOrigFileName.find('.')]
+                        curOrigFileNameRaw=curOrigFileName[0:curOrigFileName.rfind('.')]
                         if curAnnotFileRaw==curOrigFileNameRaw:
                             # found it
                             foundIt=True
@@ -4070,6 +4070,9 @@ class ExportFrame(QWidget):
 
         self.finished=True
         self.exportDone=True
+
+        # pop message: export finished
+        self.showExportFinished()
 
 
     def cancelMultiSelection(self):
@@ -4358,7 +4361,7 @@ class ExportFrame(QWidget):
             self.saveExportedImage(maskImage,outputFileName)
 
             # also save class mask images if the ROIs have class info saved
-            for c in range(nonEmptyClassNameNumbers):
+            for c in range(len(nonEmptyClassNameNumbers)):
 
                 curClassNum=nonEmptyClassNameNumbers[c]
 
@@ -4368,7 +4371,7 @@ class ExportFrame(QWidget):
                 os.makedirs(exportFolderClass,exist_ok=True)
                 print(f'Created class output folder: {exportFolderClass}')
 
-                maskImage2=self.createClassMaskStack(size,width,height,roiCount,curClassNum,shapesLayer,deepcopy(maskImage))
+                maskImage2=self.createClassMaskStack(width,height,roiCount,curClassNum,shapesLayer,labels)
                 if maskImage2 is None:
                     return
 
@@ -4389,8 +4392,8 @@ class ExportFrame(QWidget):
                 # create new empty mask
                 maskImage=deepcopy(labels)
 
-            maskImage.astype(bool)
-            maskImage[numpy.where(maskImage>0)]=1
+            maskImage=maskImage.astype(bool)
+            #maskImage[numpy.where(maskImage>0)]=1
 
             # create export folder:
             annotationFolder2=self.createExportFolder(exportFolder)
@@ -4410,14 +4413,14 @@ class ExportFrame(QWidget):
                 os.makedirs(exportFolderClass,exist_ok=True)
                 print(f'Created class output folder: {exportFolderClass}')
 
-                maskImage2=self.createClassMask(roiCount,curClassNum,shapesLayer,False,labels)
+                maskImage2=self.createClassMask(roiCount,curClassNum,shapesLayer,False,deepcopy(labels))
                 if maskImage2 is None:
                     return
 
                 # construct output file name:
                 outputFileName=os.path.join(exportFolderClass,curAnnotFileRaw+'.tiff')
 
-                self.saveExportedImage(maskImage2,outputFileName)
+                self.saveExportedImage(maskImage2.astype(bool),outputFileName)
 
             refreshMask=True
 
@@ -4460,9 +4463,9 @@ class ExportFrame(QWidget):
             outputFileName=os.path.join(annotationFolder2,curAnnotFileRaw+'.csv')
             # save output csv:
             # TODO: create fcn for this
-            if (bboxFormat==0):
+            if (self.bboxFormat==0):
                 self.saveExportedCSV(bboxList,outputFileName)
-            elif (bboxFormat==1):
+            elif (self.bboxFormat==1):
                 self.saveExportedCSVyolo(bboxList,outputFileName)
             #saveExportedImage(maskImage, outputFileName);
 
@@ -4477,16 +4480,16 @@ class ExportFrame(QWidget):
                 os.makedirs(exportFolderClass,exist_ok=True)
                 print(f'Created class output folder: {exportFolderClass}')
 
-                bboxList2=self.createClassCSV(roiCount,curClassNum,shapesLayer,width,height,bboxFormat)
+                bboxList2=self.createClassCSV(roiCount,curClassNum,shapesLayer,width,height,self.bboxFormat)
                 if bboxList2 is None:
                     return
 
                 # construct output file name:
                 outputFileName=os.path.join(exportFolderClass,curAnnotFileRaw+'.csv')
 
-                if (bboxFormat==0):
+                if (self.bboxFormat==0):
                     self.saveExportedCSV(bboxList2,outputFileName)
-                elif (bboxFormat==1):
+                elif (self.bboxFormat==1):
                     self.saveExportedCSVyolo(bboxList2,outputFileName)
 
             refreshMask=True
@@ -4512,7 +4515,7 @@ class ExportFrame(QWidget):
         # finished this image
         # not yet:
         #progressBar.set_description(progressText) # i+1
-        progressBar.update(i+1)
+        progressBar.update(1)
         if i==annotFileCount:
             # finished every image in the folder
             if hasattr(self,'btnOk') and hasattr(self,'btnCancelProgress') and hasattr(self,'lblExportingImages'):
@@ -4601,21 +4604,26 @@ class ExportFrame(QWidget):
 
     def saveExportedImage(self,img,path):
         if len(img.shape)==2:
-            skimage.io.imsave(path,img,check_contrast=False)
+            if img.dtype!=bool:
+                skimage.io.imsave(path,img,check_contrast=False)
+            else:
+                import tifffile
+                tifffile.imwrite(path,img,photometric='minisblack')
         elif len(img.shape)>2:
             # stack image
-            #import skimage.io.tifffile as tif
-            #tif.imsave(path,img, bigtiff=True)
-            #skimage.io.imsave(path,img,plugin='tifffile')
             import tifffile
-            tifffile.write(path,img) #numpy.swapaxes(img,0,-1)
+            # img is like XxYxN where N: number of objects, X,Y: image size in xy
+            # tifffile needs it like NxYxX
+            img2=numpy.swapaxes(img,0,-1)
+            img3=numpy.swapaxes(img2,-2,-1)
+            tifffile.imwrite(path,img3,photometric='minisblack') #numpy.swapaxes(img,0,-1)
         print('Saved exported image: {}'.format(path))
         print('---------------------')
 
 
     # COCO format: [x,y,w,h] --> top left (x,y) + width, height
     def fillBboxList(self,shapeLayer,roiCount):
-        if shapeLayer is None or roiCount<1 or len(shapesLayer.data)!=roiCount:
+        if shapeLayer is None or roiCount<1 or len(shapeLayer.data)!=roiCount:
             print('Cannot find bounding boxes for export')
             return None
 
@@ -4641,7 +4649,7 @@ class ExportFrame(QWidget):
 
     # YOLO format: [class,x,y,w,h] normalized to [0,1] --> center (x,y) + width, height
     def fillBboxListYOLO(self,shapeLayer,roiCount,width,height):
-        if shapeLayer is None or roiCount<1 or len(shapesLayer.data)!=roiCount:
+        if shapeLayer is None or roiCount<1 or len(shapeLayer.data)!=roiCount:
             print('Cannot find bounding boxes for export')
             return None
 
@@ -4668,6 +4676,7 @@ class ExportFrame(QWidget):
 
 
     def saveExportedCSV(self,bboxes,outPath):
+        import csv
         with open(outPath,'w',newline='') as csvFile:
             csvWriter = csv.writer(csvFile, delimiter=',')
             # write header
@@ -4678,7 +4687,7 @@ class ExportFrame(QWidget):
 
     def saveExportedCSVyolo(self,bboxes,outPath):
         # YOLO data format: [class x_center y_center w h] normalized, white space delimited
-
+        import csv
         if os.path.splitext(outPath)[1]==('.csv'):
             outPath=outPath[0:-4]+'.txt'
 
@@ -4713,10 +4722,10 @@ class ExportFrame(QWidget):
                 elif bboxFormat==1:
                     # YOLO format
                     y,x=bbox[8,:]
-                    x=x/width
-                    y=y/height
-                    w=(bbox[6,1]-bbox[0,1])/width
-                    h=(bbox[2,0]-bbox[0,0])/height
+                    x=x/imWidth
+                    y=y/imHeight
+                    w=(bbox[6,1]-bbox[0,1])/imWidth
+                    h=(bbox[2,0]-bbox[0,0])/imHeight
                     bboxList.append([c,x,y,w,h])
 
                 else:
@@ -4745,6 +4754,7 @@ class ExportFrame(QWidget):
         # LUT for class colours
         classColours=[[1,0,0,1],[0,1,0,1],[0,0,1,1],[0,1,1,1],[1,0,1,1],[1,1,0,1],[1,0.65,0,1],[1,1,1,1],[0,0,0,1]]
         # add some more colours
+        classColours2=deepcopy(classColours)
         for i in range(len(classColours)):
             classColours2[i]=[0.5*x for x in classColours[i]]
         classColours=classColours+classColours2
@@ -4765,6 +4775,18 @@ class ExportFrame(QWidget):
             for ch in range(3):
                 overlayed[:, :, ch] = numpy.where(maskOutlinex[:, :] != 0, 255*curColour[ch], overlayed[:, :, ch])
         skimage.io.imsave(outputFileName, overlayed)
+
+
+    def showExportFinished(self):
+        # ask for confirmation
+        response=QMessageBox.information(self, 'Export finished', 'Finished exporting annotations',QMessageBox.Ok, QMessageBox.Ok)
+        if response==QMessageBox.Ok:
+            # just quit
+            print('Ok button clicked')
+
+        elif response==QMessageBox.Close:
+            # do nothing
+            print("Closed close confirm")
 
 
     def cancelExport(self):
