@@ -133,6 +133,9 @@ class AnnotatorJ(QWidget):
 
         self.ExportFrame=None
 
+        self.ColourSelector=None
+        self.overlayColour='black'
+
         # get a list of the 9 basic colours also present in AnnotatorJ's class mode
         self.colours=['red','green','blue','cyan','magenta','yellow','orange','white','black']
 
@@ -152,7 +155,7 @@ class AnnotatorJ(QWidget):
         self.btnSave.clicked.connect(self.saveData)
 
         self.btnOverlay = QPushButton('Overlay')
-        #self.btnOverlay.clicked.connect(self.setOverlay)
+        self.btnOverlay.clicked.connect(self.setOverlay)
 
         # quick export
         self.btnExport = QPushButton('[^]')
@@ -174,7 +177,7 @@ class AnnotatorJ(QWidget):
 
         self.btnColours=QPushButton('Colours')
         self.btnColours.setToolTip('Set colour for annotations or overlay')
-        #self.btnColours.clicked.connect(self.)
+        self.btnColours.clicked.connect(self.addColourWidget)
 
         # checkboxes
         # edit mode
@@ -206,7 +209,7 @@ class AnnotatorJ(QWidget):
         # show overlay
         self.chkShowOverlay = QCheckBox('Show overlay')
         self.chkShowOverlay.setChecked(False)
-        #self.chkShowOverlay.stateChanged.connect(self.showOverlay)
+        self.chkShowOverlay.stateChanged.connect(self.showOverlay)
         # class mode
         self.chckbxClass = QCheckBox('Class mode')
         self.chckbxClass.setChecked(False)
@@ -452,6 +455,8 @@ class AnnotatorJ(QWidget):
         else:
             self.setContourAssist(False)
 
+        self.overlayAdded=False
+
         # when open function finishes:
         self.started=True
 
@@ -522,7 +527,8 @@ class AnnotatorJ(QWidget):
             self.loadedROI=True
             roiLayer=self.findROIlayer()
             curROInum=len(roiLayer.data)
-            print('After loading we have '+str(curROInum)+' contours');
+            print('After loading we have '+str(curROInum)+' contours')
+            self.roiCount=curROInum
 
             # rename the loaded contours if there were previous contours added
             # TODO
@@ -676,7 +682,7 @@ class AnnotatorJ(QWidget):
         return rois
 
 
-    def extractROIdata(self,rois):
+    def extractROIdata(self,rois,layerName='ROI'):
         # fetch the coordinates and other data from the ImageJ ROI.zip file already imported with the roifile package
         # Inputs:
         #   rois: list of ImageJ ROI objects
@@ -720,15 +726,21 @@ class AnnotatorJ(QWidget):
             if curClass>0:
                 hasColour=True
                 # get class colour lut
-                curColour=None
-                if self.classColourLUT is None:
-                    self.initClassColourLUT(rois)
-                
-                curColour=self.classColourLUT[curClass]
-                roiColours.append(curColour)
+                if layerName=='ROI':
+                    curColour=None
+                    if self.classColourLUT is None:
+                        self.initClassColourLUT(rois)
+                    
+                    curColour=self.classColourLUT[curClass]
+                    roiColours.append(curColour)
+                else:
+                    roiColours.append(self.overlayColour)
                 roiProps['class'].append(curClass)
             else:
-                roiColours.append(self.defColour)
+                if layerName=='ROI':
+                    roiColours.append(self.defColour)
+                else:
+                    roiColours.append(self.overlayColour)
                 roiProps['class'].append(0)
 
             # store the roi's name
@@ -738,11 +750,16 @@ class AnnotatorJ(QWidget):
             # TODO: fetch more data from the rois
 
         # rename any existing ROI layers so that this one is the new default
-        self.renameROIlayers()
+        self.renameROIlayers(layerName=layerName)
 
         # fill (face) colour of rois is transparent by default, only the contours are visible
+        if layerName=='ROI':
+            fillColour=[0,0,0,0]
+        else:
+            fillColour=self.colourString2Float(self.overlayColour)
+            fillColour[-1]=0.5
         # edge_width=0.5 actually sets it to 1
-        shapesLayer = Shapes(data=roiList,shape_type=roiType,name='ROI',edge_width=0.5,edge_color=roiColours,face_color=[0,0,0,0],properties=roiProps,text=roiTextProps)
+        shapesLayer = Shapes(data=roiList,shape_type=roiType,name=layerName,edge_width=0.5,edge_color=roiColours,face_color=fillColour,properties=roiProps,text=roiTextProps)
 
         return shapesLayer
 
@@ -803,12 +820,12 @@ class AnnotatorJ(QWidget):
         print('Could not find the ROI layer')
         return None
 
-    def renameROIlayers(self):
+    def renameROIlayers(self,layerName='ROI'):
         for x in self.viewer.layers:
-            if (x.__class__ is Shapes and x.name=='ROI'):
+            if (x.__class__ is Shapes and x.name==layerName):
                 print('{} was a ROI shapes layer'.format(x.name))
                 # rename it
-                newName='ROI_prev'
+                newName=layerName+'_prev'
                 k=0
                 while newName in self.viewer.layers:
                     k+=1
@@ -1165,7 +1182,7 @@ class AnnotatorJ(QWidget):
         s=imageLayer.data.shape
         self.imgSize=s
         
-        if pos[0]<=0 or pos[1]<=0 or pos[0]>s[1] or pos[1]>s[0]:
+        if pos[0]<=0 or pos[1]<=0 or pos[0]>s[0] or pos[1]>s[1]:
             print('(Edit mode) not on the image')
             self.startedEditing=False
             self.origEditedROI=None
@@ -2535,7 +2552,7 @@ class AnnotatorJ(QWidget):
             # get clicked coordinates relative to the source component
             pos=layer.world_to_data(event.position)
 
-            if pos[0]<=0 or pos[1]<=0 or pos[0]>s[1] or pos[1]>s[0]:
+            if pos[0]<=0 or pos[1]<=0 or pos[0]>s[0] or pos[1]>s[1]:
                 print('(Class mode) not on the image')
             else:
                 print('(Class mode) click on {}'.format(pos))
@@ -2793,6 +2810,86 @@ class AnnotatorJ(QWidget):
                     print(e)
 
             shapesLayer.mode='add_polygon'
+
+
+    def showOverlay(self,state):
+        overlayLayer=self.findROIlayer(layerName='overlay')
+        if state == Qt.Checked:
+            self.showOvl=True
+            print('Show overlay selected')
+
+            if self.overlayAdded and overlayLayer is not None:
+                overlayLayer.visible=True
+        else:
+            self.showOvl=False
+            print('Show overlay cleared')
+
+            if self.overlayAdded and overlayLayer is not None:
+                overlayLayer.visible=False
+
+
+    def addColourWidget(self):
+        if self.ColourSelector is None:
+            self.ColourSelector=ColourSelector(self.viewer,annotatorjObj=self)
+        else:
+            print('Colour widget already open')
+
+
+    def setOverlay(self):
+        # browse an ImageJ ROI zip file as an 'overlay' (actually also a shapes layer in napari)
+        if not self.started or (self.findImageLayer() is None or self.findImageLayer().data is None):
+            warnings.warn('Open an image and annotate it first')
+            return
+
+        # check if we have annotations in the list before loading anything to it
+        roiLayer=self.findROIlayer(layerName='overlay')
+        curROInum=len(roiLayer.data) if roiLayer is not None else 0
+        print('Before loading we had '+str(curROInum)+' contours on overlay');
+        prevROIcount=curROInum
+
+        if self.loadedROI:
+            # currently the loaded rois are appended to the current roi list
+            # TODO: ask if those should be deleted first
+            pass
+
+        # check if masks can be loaded (false by default)
+        if self.enableMaskLoad:
+            # TODO
+            pass
+        else:
+            # normal way, import ROI.zip file
+            roiFileName,_=QFileDialog.getOpenFileName(
+                self,"Select an annotation (ROI) .zip file",
+                str(os.path.join(self.defDir,self.defFile)),"Archives (*.zip)")
+            print(roiFileName)
+            if os.path.exists(roiFileName):
+                loadedROIfolder=os.path.dirname(roiFileName)
+                loadedROIname=os.path.basename(roiFileName)
+                rois=ImagejRoi.fromfile(roiFileName)
+                print('Opened ROI: {}'.format(roiFileName))
+            else:
+                print('Failed to open ROI .zip file: {}'.format(roiFileName))
+                return
+
+
+            #self.add2RoiManager(rois)
+            shapesLayer=self.extractROIdata(rois,layerName='overlay')
+            if shapesLayer is not None:
+                self.viewer.add_layer(shapesLayer)
+                print('Loaded {} ROIs successfully on overlay'.format(len(rois)))
+                self.overlayAdded=True
+
+            roiLayer=self.findROIlayer(True)
+
+            # select the "select shape" mode from the controls by default
+            #shapesLayer.mode = 'select'
+            # select the "add polygon" mode from the controls by default to enable freehand ROI drawing
+            roiLayer.mode = 'add_polygon'
+
+            self.viewer.reset_view()
+
+        self.showOvl=True
+        self.chkShowOverlay.setChecked(True)
             
 
 
@@ -3452,6 +3549,158 @@ class ClassesFrame(QWidget):
 
 # -------------------------------------
 # end of class ClassesFrame
+# -------------------------------------
+
+
+# colour selection widget
+class ColourSelector(QWidget):
+    def __init__(self,napari_viewer,annotatorjObj=None):
+        super().__init__()
+        self.viewer = napari_viewer
+        self.annotatorjObj=annotatorjObj
+
+        # check if there is opened instance of this frame
+        # the main plugin is: 'napari-annotatorj: Annotator J'
+        if self.annotatorjObj is not None and self.annotatorjObj.ColourSelector is not None:
+            # already inited once, load again
+            print('detected that Colour widget has already been initialized')
+            if self.annotatorjObj.ColourSelector.isVisible():
+                print('Colour widget is visible')
+                return
+            else:
+                print('Colour widget is not visible')
+                # rebuild the widget
+
+        # UI elements
+        self.setWindowTitle('Select contour colours')
+        self.annotLabel=QLabel('annotation:')
+        self.overlayLabel=QLabel('overlay:')
+        self.annotColourBox=QComboBox()
+        self.overlayColourBox=QComboBox()
+        self.addColours(self.annotColourBox)
+        self.addColours(self.overlayColourBox)
+        self.annotColourBox.setCurrentText(self.annotatorjObj.defColour)
+        self.overlayColourBox.setCurrentText(self.annotatorjObj.overlayColour)
+        self.annotColourBox.currentIndexChanged.connect(self.updateAnnotColour)
+        self.overlayColourBox.currentIndexChanged.connect(self.updateOverlayColour)
+
+        self.btnOk=QPushButton('Ok')
+        self.btnOk.clicked.connect(self.updateColour)
+        self.btnCancel=QPushButton('Cancel')
+        self.btnCancel.clicked.connect(self.closeWidget)
+
+
+        self.classMainVBox=QVBoxLayout()
+        self.classHeaderHBox=QHBoxLayout()
+        self.classContentHBox=QHBoxLayout()
+        self.labelLeftVBox=QVBoxLayout()
+        self.comboRightVBox=QVBoxLayout()
+
+        self.labelLeftVBox.addWidget(self.annotLabel)
+        self.labelLeftVBox.addWidget(self.overlayLabel)
+
+        self.comboRightVBox.addWidget(self.annotColourBox)
+        self.comboRightVBox.addWidget(self.overlayColourBox)
+
+        self.classContentHBox.addWidget(self.btnOk)
+        self.classContentHBox.addWidget(self.btnCancel)
+
+        self.labelLeftVBox.setAlignment(Qt.AlignRight)
+        self.classHeaderHBox.addLayout(self.labelLeftVBox)
+        self.classHeaderHBox.addLayout(self.comboRightVBox)
+
+        self.classMainVBox.addLayout(self.classHeaderHBox)
+        self.classMainVBox.addLayout(self.classContentHBox)
+
+        self.setLayout(self.classMainVBox)
+        #self.show()
+        self.viewer.window.add_dock_widget(self,name='Colours')
+
+
+    def addColours(self,comboBox):
+        comboBox.addItem('red')
+        comboBox.addItem('green')
+        comboBox.addItem('blue')
+        comboBox.addItem('cyan')
+        comboBox.addItem('magenta')
+        comboBox.addItem('yellow')
+        comboBox.addItem('orange')
+        comboBox.addItem('white')
+        comboBox.addItem('black')
+
+
+    def updateAnnotColour(self,idx):
+        colour=self.annotColourBox.currentText()
+        print(f'Set annotation colour: {colour}')
+        #self.updateColour(colour,0)
+
+
+    def updateOverlayColour(self,idx):
+        colour=self.overlayColourBox.currentText()
+        print(f'Set overlay colour: {colour}')
+        #self.updateColour(colour,1)
+
+
+    def updateColour(self,colour,toUpdate=2):
+        if toUpdate==0:
+            # annot colour update
+            self.annotatorjObj.defColour=colour
+            self.updateROIcolours(0)
+        elif toUpdate==1:
+            # overlay colour update
+            self.annotatorjObj.overlayColour=colour
+            self.updateROIcolours(1)
+        elif toUpdate==2:
+            # update both
+            self.annotatorjObj.defColour=self.annotColourBox.currentText()
+            self.annotatorjObj.overlayColour=self.overlayColourBox.currentText()
+            self.updateROIcolours(0)
+            self.updateROIcolours(1)
+
+            # also destroy the widget
+            self.closeWidget()
+
+
+    def updateROIcolours(self,toUpdate):
+        if toUpdate==0:
+            # annot colour update
+            shapeLayer=self.annotatorjObj.findROIlayer()
+            if shapeLayer is None:
+                print('Cannot update ROI colours, layer not found (ROI)')
+                return
+            for i in range(len(shapeLayer.data)):
+                if shapeLayer.properties['class'][i]==0:
+                    # only update unclassified rois' edge colour
+                    shapeLayer._data_view.update_edge_color(i,self.annotatorjObj.colourString2Float(self.annotatorjObj.defColour))
+            shapeLayer.refresh()
+
+        elif toUpdate==1:
+            # overlay colour update
+            shapeLayer=self.annotatorjObj.findROIlayer(layerName='overlay')
+            if shapeLayer is None:
+                print('Cannot update overlay colours, layer not found (overlay)')
+                return
+            for i in range(len(shapeLayer.data)):
+                # all rois' edge colour is updated
+                shapeLayer._data_view.update_edge_color(i,self.annotatorjObj.colourString2Float(self.annotatorjObj.overlayColour))
+                # also update face colour for overlays
+                overlayCol=self.annotatorjObj.colourString2Float(self.annotatorjObj.overlayColour)
+                overlayCol[-1]=0.5
+                shapeLayer._data_view.update_face_color(i,overlayCol)
+            shapeLayer.refresh()
+
+
+    def closeWidget(self):
+        if self.annotatorjObj.ColourSelector is not None:
+                try:
+                    self.viewer.window.remove_dock_widget(self.annotatorjObj.ColourSelector)
+                    self.annotatorjObj.ColourSelector=None
+                except Exception as e:
+                    print(e)
+
+
+# -------------------------------------
+# end of class ColourSelector
 # -------------------------------------
 
 
