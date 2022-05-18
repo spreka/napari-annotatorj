@@ -22,7 +22,7 @@ from napari.layers.shapes import _shapes_mouse_bindings as mouse_bindings
 from napari.layers.labels import _labels_mouse_bindings as labels_mouse_bindings
 import warnings
 from cv2 import cv2
-from copy import deepcopy
+from copy import deepcopy,copy
 #from napari.qt import create_worker #thread_worker
 from napari.qt.threading import thread_worker #create_worker
 
@@ -1007,7 +1007,7 @@ class AnnotatorJ(QWidget):
         if self.cancelledSaving:
             # abort saving
             return
-        
+
         print(f'Set class: {self.selectedClass}')
 
         # set output folder and create it
@@ -2619,7 +2619,7 @@ class AnnotatorJ(QWidget):
                     layer.refresh()
                     layer.refresh_text()
                     #layer.mode='select'
-                    layer._set_highlight(force=True)
+                    #layer._set_highlight(force=True)
                     
                 else:
                     # failed to find the currently clicked point's corresponding ROI
@@ -2804,11 +2804,14 @@ class AnnotatorJ(QWidget):
             print(f'selected col: {self.selectedClassColourIdx}')
             self.classesFrame=ClassesFrame(self.viewer,self)
 
+            shapesLayer.mode='select'
             # add mouse click callback to classify ROIs
+            if self.customShapesLayerSelect not in shapesLayer.mouse_drag_callbacks and mouse_bindings.select in shapesLayer.mouse_drag_callbacks:
+                shapesLayer.mouse_drag_callbacks.append(self.customShapesLayerSelect)
+                shapesLayer.mouse_drag_callbacks.remove(mouse_bindings.select)
             if self.classifyROI not in shapesLayer.mouse_drag_callbacks:
                 shapesLayer.mouse_drag_callbacks.append(self.classifyROI)
 
-            shapesLayer.mode='select'
 
         else:
             self.classMode=False
@@ -2820,6 +2823,13 @@ class AnnotatorJ(QWidget):
                     self.viewer.window.remove_dock_widget(self.classesFrame)
                 except Exception as e:
                     print(e)
+
+            # restore default 'select' mouse click callback
+            if mouse_bindings.select not in shapesLayer.mouse_drag_callbacks and self.customShapesLayerSelect in shapesLayer.mouse_drag_callbacks:
+                shapesLayer.mouse_drag_callbacks.append(mouse_bindings.select)
+                shapesLayer.mouse_drag_callbacks.remove(self.customShapesLayerSelect)
+            if self.classifyROI in shapesLayer.mouse_drag_callbacks:
+                shapesLayer.mouse_drag_callbacks.remove(self.classifyROI)
 
             shapesLayer.mode='add_polygon'
 
@@ -3020,6 +3030,85 @@ class AnnotatorJ(QWidget):
         if self.classSelectionDialog is not None:
             self.classSelectionDialog.done(1)
             self.classSelectionDialog=None
+
+
+    # modified version of napari.layers.shapes._shapes_mouse_bindings.select that disables the bounding box around selected shapes when clicked
+    def customShapesLayerSelect(self,layer,event):
+        """Select shapes or vertices either in select or direct select mode.
+
+        Once selected shapes can be moved or resized, and vertices can be moved
+        depending on the mode. Holding shift when resizing a shape will preserve
+        the aspect ratio.
+        """
+        shift = 'Shift' in event.modifiers
+        # on press
+        value = layer.get_value(event.position, world=True)
+        layer._moving_value = copy(value)
+        shape_under_cursor, vertex_under_cursor = value
+        if vertex_under_cursor is None:
+            if shift and shape_under_cursor is not None:
+                if shape_under_cursor in layer.selected_data:
+                    layer.selected_data.remove(shape_under_cursor)
+                else:
+                    if len(layer.selected_data):
+                        # one or more shapes already selected
+                        layer.selected_data.add(shape_under_cursor)
+                    else:
+                        # first shape being selected
+                        layer.selected_data = {shape_under_cursor}
+            elif shape_under_cursor is not None:
+                if shape_under_cursor not in layer.selected_data:
+                    layer.selected_data = {shape_under_cursor}
+            else:
+                layer.selected_data = set()
+        #layer._set_highlight()
+
+        # we don't update the thumbnail unless a shape has been moved
+        update_thumbnail = False
+        yield
+
+        # on move
+        while event.type == 'mouse_move':
+            coordinates = layer.world_to_data(event.position)
+            # ToDo: Need to pass moving_coordinates to allow fixed aspect ratio
+            # keybinding to work, this should be dropped
+            layer._moving_coordinates = coordinates
+            # Drag any selected shapes
+            if len(layer.selected_data) == 0:
+                mouse_bindings._drag_selection_box(layer, coordinates)
+            else:
+                mouse_bindings._move(layer, coordinates)
+
+            # if a shape is being moved, update the thumbnail
+            if layer._is_moving:
+                update_thumbnail = True
+            yield
+
+        # only emit data once dragging has finished
+        if layer._is_moving:
+            layer.events.data(value=layer.data)
+
+        # on release
+        shift = 'Shift' in event.modifiers
+        if not layer._is_moving and not layer._is_selecting and not shift:
+            if shape_under_cursor is not None:
+                layer.selected_data = {shape_under_cursor}
+            else:
+                layer.selected_data = set()
+        elif layer._is_selecting:
+            layer.selected_data = layer._data_view.shapes_in_box(layer._drag_box)
+            layer._is_selecting = False
+            #layer._set_highlight()
+
+        layer._is_moving = False
+        layer._drag_start = None
+        layer._drag_box = None
+        layer._fixed_vertex = None
+        layer._moving_value = (None, None)
+        #layer._set_highlight()
+
+        if update_thumbnail:
+            layer._update_thumbnail()
             
 
 
@@ -3170,6 +3259,8 @@ class ClassesFrame(QWidget):
             self.annotatorjObj.classNameLUT['Class_01']=1
             self.annotatorjObj.classNameLUT['Class_02']=2
 
+            self.classListList.setCurrentItem(self.classListList.item(0))
+
         else:
             # set default class selection list
             self.comboBoxDefaultClass.addItem('(none)')
@@ -3209,8 +3300,6 @@ class ClassesFrame(QWidget):
             self.comboBoxDefaultClass.setCurrentIndex(0)
             self.annotatorjObj.defaultClassNumber=0 #-1
 
-
-        self.classListList.setCurrentItem(self.classListList.item(0))
 
         # set default class (group) for all unclassified objects
         if self.annotatorjObj.classFrameNames is None and self.annotatorjObj.classFrameColours is None:
