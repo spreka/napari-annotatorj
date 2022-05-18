@@ -136,6 +136,14 @@ class AnnotatorJ(QWidget):
         self.ColourSelector=None
         self.overlayColour='black'
 
+        self.selectedClass=None
+        self.prevSelectedClass=None
+        self.propsClassString=['normal','cancerous']
+        self.finishedSelection=False
+        self.cancelledSaving=False
+        self.newClassActive=False
+
+
         # get a list of the 9 basic colours also present in AnnotatorJ's class mode
         self.colours=['red','green','blue','cyan','magenta','yellow','orange','white','black']
 
@@ -977,29 +985,33 @@ class AnnotatorJ(QWidget):
 
                 if isClassified:
                     # no need for class selection dialog box
-                    selectedClass='masks'
+                    self.selectedClass='masks'
 
                 else:
 
                     # ask class name in dialog box
-                    # TODO
-                    selectedClass='masks'
+                    self.popClassSelection()
+                    #self.selectedClass='masks'
             else:
                 # create new frame for optional extra element adding manually by the user (for new custom class):
-                # TODO
-                selectedClass='masks'
-                pass
+                self.popClassSelection()
+                #self.selectedClass='masks'
 
             
         else:
             # roi stack was imported, save to mask names
             # TODO: do this branch
-            selectedClass='masks'
-            pass
+            self.selectedClass='masks'
 
+
+        if self.cancelledSaving:
+            # abort saving
+            return
+        
+        print(f'Set class: {self.selectedClass}')
 
         # set output folder and create it
-        destMaskFolder2=os.path.join(self.defDir,selectedClass)
+        destMaskFolder2=os.path.join(self.defDir,self.selectedClass)
         os.makedirs(destMaskFolder2,exist_ok=True)
         print('Created output folder: {}'.format(destMaskFolder2))
 
@@ -2890,6 +2902,124 @@ class AnnotatorJ(QWidget):
 
         self.showOvl=True
         self.chkShowOverlay.setChecked(True)
+
+
+    def popClassSelection(self):
+        self.prevSelectedClass=deepcopy(self.selectedClass)
+
+        self.classSelectionDialog=QDialog()
+        self.classSelectionDialog.setModal(True)
+        self.classSelectionDialog.setWindowTitle('Select class')
+
+        self.classNameLabel=QLabel('Select class of objects')
+        self.classLabel=QLabel('class:')
+        self.classLabel.setToolTip('Class of your annotated objects')
+        self.newLabel=QLabel('new:')
+        self.classLabel.setToolTip('New custom class to create')
+        self.newTextField=QLineEdit()
+        self.newTextField.setEnabled(False)
+        self.newTextField.setToolTip('Name of the new class')
+
+        baseClassArray=['normal','cancerous','other...']
+        self.classList=QComboBox()
+        if self.propsClassString==baseClassArray[0:2]:
+            for el in baseClassArray:
+                self.classList.addItem(el)
+        else:
+            for el in self.propsClassString:
+                self.classList.addItem(el)
+            self.classList.addItem('other...')
+
+        self.classList.setCurrentIndex(0)
+
+        self.classList.currentIndexChanged.connect(self.saveClassSelectionChanged)
+
+        self.btnClassSelectionOk=QPushButton('OK')
+        self.btnClassSelectionOk.setToolTip('Continue to save')
+        self.btnClassSelectionOk.clicked.connect(self.saveClassSelectionOk)
+        self.btnClassSelectionCancel=QPushButton('Cancel')
+        self.btnClassSelectionCancel.setToolTip('Cancel saving')
+        self.btnClassSelectionCancel.clicked.connect(self.saveClassSelectionCancel)
+
+        self.popMainVbox=QVBoxLayout()
+        self.popContentHboxSelector=QHBoxLayout()
+        self.popContentHboxBtns=QHBoxLayout()
+        self.popLeftVbox=QVBoxLayout()
+        self.popRightVbox=QVBoxLayout()
+
+
+        self.popLeftVbox.addWidget(self.classLabel)
+        self.popLeftVbox.addWidget(self.newLabel)
+
+        self.popRightVbox.addWidget(self.classList)
+        self.popRightVbox.addWidget(self.newTextField)
+
+        self.popContentHboxSelector.addLayout(self.popLeftVbox)
+        self.popContentHboxSelector.addLayout(self.popRightVbox)
+
+        self.popContentHboxBtns.addWidget(self.btnClassSelectionOk)
+        self.popContentHboxBtns.addWidget(self.btnClassSelectionCancel)
+
+        self.popMainVbox.addWidget(self.classNameLabel)
+        self.popMainVbox.addLayout(self.popContentHboxSelector)
+        self.popMainVbox.addLayout(self.popContentHboxBtns)
+
+        self.classSelectionDialog.setLayout(self.popMainVbox)
+        self.classSelectionDialog.exec()
+
+
+    def saveClassSelectionChanged(self,idx):
+        #
+        if idx==self.classList.count()-1:
+            self.newTextField.setEnabled(True)
+            self.newClassActive=True
+        else:
+            self.newTextField.setEnabled(False)
+            self.newClassActive=False
+
+
+    def saveClassSelectionOk(self):
+        if self.newClassActive:
+            # read from the text field
+            textVal=self.newTextField.text()
+            if textVal is None or textVal=='null' or len(textVal)==0:
+                # empty string, warn the user to type something
+                self.finishedSelection=False
+                warnings.warn('Please enter a new class name or select one from the list to continue.')
+            else:
+                self.selectedClass=textVal
+                self.finishedSelection=True
+                self.cancelledSaving=False
+                self.propsClassString.append(textVal)
+                #SaveNewProp("classes",textVal)
+                self.closeClassSelectionFrame()
+
+        else:
+            # get from the list
+            self.selectedClass=self.classList.currentText()
+            self.finishedSelection=True
+            self.cancelledSaving=False
+            self.closeClassSelectionFrame()
+
+
+    def saveClassSelectionCancel(self):
+        self.cancelClassSelection()
+
+
+    def cancelClassSelection(self):
+        # remember that saving was cancelled here!
+        self.cancelledSaving=True
+        print('Cancelled saving')
+
+        self.selectedClass=deepcopy(self.prevSelectedClass)
+        self.closeClassSelectionFrame()
+
+
+    def closeClassSelectionFrame(self):
+        # close the progress window
+        if self.classSelectionDialog is not None:
+            self.classSelectionDialog.done(1)
+            self.classSelectionDialog=None
             
 
 
