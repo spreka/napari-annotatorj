@@ -55,6 +55,7 @@ class AnnotatorJ(QWidget):
         self.imp=None # the original image
         #self.manager=self.initRoiManager # the set of ROIs as in ImageJ
         #self.manager=None
+        self.annotEdgeWidth=0.5
         self.initRoiManager() # the set of ROIs as in ImageJ
         self.roiCount=0
         self.roiLayer=None # remember the current ROI shapes layer
@@ -283,7 +284,13 @@ class AnnotatorJ(QWidget):
 
         # add dummy buttons as spacers
         self.vBoxRightDummy.setAlignment(Qt.AlignTop)
-        self.vBoxRightDummy.addSpacing(62)
+        #self.vBoxRightDummy.addSpacing(62)
+        self.btnDummy1=QPushButton()
+        self.btnDummy2=QPushButton()
+        self.btnDummy1.setEnabled(False)
+        self.btnDummy2.setEnabled(False)
+        self.vBoxRightDummy.addWidget(self.btnDummy1)
+        self.vBoxRightDummy.addWidget(self.btnDummy2)
         self.vBoxRightDummy.addWidget(self.btnExport)
         
         self.vBoxRightReal.setAlignment(Qt.AlignTop)
@@ -412,6 +419,23 @@ class AnnotatorJ(QWidget):
         # if so, bring it forward
         roiLayer=self.findROIlayer(True)
         if roiLayer is None:
+            # set roi edge width for visibility
+            s=imageLayer.data.shape
+            if (s[0]<=300) and (s[1]<=300):
+                self.annotEdgeWidth=0.5
+            elif (s[0]>300 and s[0]<=500) or (s[1]>300 and s[1]<=500):
+                self.annotEdgeWidth=1.0
+            elif (s[0]>500 and s[0]<=1000) or (s[1]>500 and s[1]<=1000):
+                self.annotEdgeWidth=1.5
+            elif (s[0]>1000 and s[0]<=1500) or (s[1]>1000 and s[1]<=1500):
+                self.annotEdgeWidth=2.0
+            elif (s[0]>1500 and s[0]<=2000) or (s[1]>1500 and s[1]<=2000):
+                self.annotEdgeWidth=3.0
+            elif (s[0]>2000 and s[0]<=3000) or (s[1]>2000 and s[1]<=3000):
+                self.annotEdgeWidth=5.0
+            else:
+                self.annotEdgeWidth=7.0
+
             # create new ROI layer if none present
             self.initRoiManager()
         self.viewer.reset_view()
@@ -601,7 +625,7 @@ class AnnotatorJ(QWidget):
             'visible':False
         }
         # add an empty shapes layer
-        shapesLayer=Shapes(data=numpy.array([[0,0],[1,1]]),shape_type='polygon',name='ROI',edge_width=0.5,edge_color='white',face_color=[0,0,0,0],properties=roiProps,text=roiTextProps)
+        shapesLayer=Shapes(data=numpy.array([[0,0],[1,1]]),shape_type='polygon',name='ROI',edge_width=self.annotEdgeWidth,edge_color='white',face_color=[0,0,0,0],properties=roiProps,text=roiTextProps)
         self.viewer.add_layer(shapesLayer)
         # remove dummy shape used to init text props and its visibility
         shapesLayer._data_view.remove(0)
@@ -767,7 +791,7 @@ class AnnotatorJ(QWidget):
             fillColour=self.colourString2Float(self.overlayColour)
             fillColour[-1]=0.5
         # edge_width=0.5 actually sets it to 1
-        shapesLayer = Shapes(data=roiList,shape_type=roiType,name=layerName,edge_width=0.5,edge_color=roiColours,face_color=fillColour,properties=roiProps,text=roiTextProps)
+        shapesLayer = Shapes(data=roiList,shape_type=roiType,name=layerName,edge_width=self.annotEdgeWidth,edge_color=roiColours,face_color=fillColour,properties=roiProps,text=roiTextProps)
 
         return shapesLayer
 
@@ -939,7 +963,7 @@ class AnnotatorJ(QWidget):
 
             # fill (face) colour of rois is transparent by default, only the contours are visible
             # edge_width=0.5 actually sets it to 1
-            layer.add(data=yx,shape_type=roiType,edge_width=0.5,edge_color=curColour,face_color=[0,0,0,0])#,properties=roiProps,text=roiTextProps)
+            layer.add(data=yx,shape_type=roiType,edge_width=self.annotEdgeWidth,edge_color=curColour,face_color=[0,0,0,0])#,properties=roiProps,text=roiTextProps)
 
             # TODO: fetch more data from the rois
 
@@ -1125,7 +1149,7 @@ class AnnotatorJ(QWidget):
                 key_bindings.finish_drawing_shape(layer)
                 #print(freeCoords)
                 # add the coords as a new shape
-                layer.add(data=freeCoords,shape_type='polygon',edge_width=0.5,edge_color=self.defColour,face_color=[0,0,0,0])
+                layer.add(data=freeCoords,shape_type='polygon',edge_width=self.annotEdgeWidth,edge_color=self.defColour,face_color=[0,0,0,0])
                 if self.contAssist and not self.inAssisting:
                     self.contAssistROI()
             # else: do nothing
@@ -1488,8 +1512,18 @@ class AnnotatorJ(QWidget):
                     contour,hierarchy=cv2.findContours(filled.astype(numpy.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
                     if not (contour and len(contour)==1):
                         msg='Cannot create roi from this label'
-                        warnings.warn(msg)
-                        return None
+                        # try to find the largest contour in the list
+                        try:
+                            f=(lambda x: len(x))
+                            lengths=[f(c) for c in contour]
+                            contour=contour[lengths.index(max(lengths))]
+                        except Exception as e:
+                            print(e)
+                            warnings.warn(msg)
+                            return None
+                        msg=msg+' - selecting largest contour'
+                        print(msg)
+                        #return None
                 else:
                     msg='Cannot create roi from this label'
                     warnings.warn(msg)
@@ -1497,7 +1531,7 @@ class AnnotatorJ(QWidget):
 
             shape=numpy.array(numpy.fliplr(numpy.squeeze(contour)))
             roiLayer=self.findROIlayer()
-            roiLayer.add_polygons(shape,edge_color=self.defColour,face_color=None,edge_width=0.5)
+            roiLayer.add_polygons(shape,edge_color=self.defColour,face_color=None,edge_width=self.annotEdgeWidth)
             roiLayer.refresh()
             print('Added ROI ('+str(len(roiLayer.data))+'.) - assist mode')
 
@@ -2119,10 +2153,10 @@ class AnnotatorJ(QWidget):
 
         #from .predict_unet import callPredictUnet,callPredictUnetLoaded,loadUnetModel
         try:
-            from .predict_unet import callPredictUnet,callPredictUnetLoadedNoset,loadUnetModelSetGpu
+            from .predict_unet import callPredictUnet,callPredictUnetLoadedNoset,loadUnetModelSetGpu,callPredictUnetLoadedNosetCustomSize
         except ImportError as e:
             try:
-                from predict_unet import callPredictUnet,callPredictUnetLoadedNoset,loadUnetModelSetGpu
+                from predict_unet import callPredictUnet,callPredictUnetLoadedNoset,loadUnetModelSetGpu,callPredictUnetLoadedNosetCustomSize
             except Exception as e:
                 print(e)
                 return
@@ -2223,7 +2257,9 @@ class AnnotatorJ(QWidget):
             
             # expects rank 4 array with shape [miniBatchSize,layerInputDepth,inputHeight,inputWidth]
             #predictedImage=callPredictUnetLoaded(self.trainedUNetModel,self.curOrigImage,gpuSetting=self.gpuSetting)
-            predictedImage=callPredictUnetLoadedNoset(self.trainedUNetModel,self.curOrigImage)
+            #predictedImage=callPredictUnetLoadedNoset(self.trainedUNetModel,self.curOrigImage)
+            predictedImage=callPredictUnetLoadedNosetCustomSize(self.trainedUNetModel,self.curOrigImage)
+            
             print('  >> prediction done...')
 
             maskImage=self.viewer.add_image(predictedImage,name='title')
@@ -5332,7 +5368,7 @@ class ExportFrame(QWidget):
 
         # fill (face) colour of rois is transparent by default, only the contours are visible
         # edge_width=0.5 actually sets it to 1
-        shapesLayer = Shapes(data=roiList,shape_type=roiType,name='ROI',edge_width=0.5,edge_color=roiColours,face_color=[0,0,0,0],properties=roiProps,text=roiTextProps)
+        shapesLayer = Shapes(data=roiList,shape_type=roiType,name='ROI',edge_width=self.annotEdgeWidth,edge_color=roiColours,face_color=[0,0,0,0],properties=roiProps,text=roiTextProps)
 
         return shapesLayer
 
