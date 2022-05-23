@@ -9,6 +9,8 @@
 
 The napari adaptation of the ImageJ/Fiji plugin AnnotatorJ for easy image annotation.
 
+![image](https://drive.google.com/uc?export=view&id=1fVfvanffTdrXvLE0m1Yo6FV5TAjh6sb2)
+
 ----------------------------------
 
 This [napari] plugin was generated with [Cookiecutter] using with [@napari]'s [cookiecutter-napari-plugin] template.
@@ -34,56 +36,201 @@ To install latest development version :
     pip install git+https://github.com/spreka/napari-annotatorj.git
 
 
-## How to use
+***
+## Intro
 
 napari-annotatorj has several convenient functions to speed up the annotation process, make it easier and more fun. These *modes* can be activated by their corresponding checkboxes on the left side of the main AnnotatorJ widget.
 
+- [Contour assist mode](#contour-assist-mode)
+- [Edit mode](#edit-mode)
+- [Class mode](#class-mode)
+- [Overlay](#overlay)
+
 Freehand drawing is enabled in the plugin. The "Add polygon" tool is selected by default upon startup. To draw a freehand object (shape) simply hold the mouse and drag it around the object. The contour is visualized when the mouse button is released.
 
-![image](https://drive.google.com/uc?export=view&id=1fVfvanffTdrXvLE0m1Yo6FV5TAjh6sb2)
+See [intro](#how-to-annotate) for a quick start.
 
-### Contour assist mode
-- assisted annotation via a pre-trained deep learning model's suggested contour
-    1. initialize a contour with mouse drag around an object
-    2. the suggested contour is displayed automatically
-    3. modify the contour:
-        - edit with mouse drag or 
-        - erase holding "Alt"
-    4. finalize it
-        - accept with pressing "q" or
-        - reject with pressing "Ctrl" + "Del"
-- click to watch demo below
+***
+## How to annotate
+
+1. Open --> opens an image
+2. Select annotation type (coming soon) --> a default tool is selected from the toolbar that fits the selected annotation type
+3. Start annotating objects
+	- instance: draw contours around objects
+	- semantic (coming soon): paint the objects' area
+	- bounding box (coming soon): draw rectangles around the objects
+4. Save --> Select class --> saves the annotation to a file in a sub-folder of the original image folder with the name of the selected class
+
+5. (Optionally)
+	- Load --> continue a previous annotation
+	- Overlay --> display a different annotation as overlay (semi-transparent) on the currently opened image
+	- Colours --> select annotation and overlay colours
+	- ... (coming soon) --> set options for semantic segmentation and *Contour assist* mode
+	- checkboxes --> Various options
+		- (default) Add automatically --> adds the most recent annotation to the ROI list automatically when releasing the left mouse button
+		- Smooth (coming soon) --> smooths the contour (in instance annotation type only)
+		- Show contours --> displays all the contours in the ROI list
+		- Contours assist --> suggests a contour in the region of an initial, lazily drawn contour using the deep learning method U-Net
+		- Show overlay --> displays the overlayed annotation if loaded with the Overlay button
+		- Edit mode --> edits a selected, already saved contour in the ROI list by clicking on it on the image
+		- Class mode --> assigns the selected class to the selected contour in the ROI list by clicking on it on the image and displays its contour in the class's colour (can be set in the Class window); clicking on the object a second time unclassifies it
+	- [^] --> quick export in 16-bit multi-labelled .tiff format; if classified, also exports by classes
+
+***
+## Contour assist mode
+Assisted annotation via a pre-trained deep learning model's suggested contour.
+
+1. initialize a contour with mouse drag around an object
+2. the suggested contour is displayed automatically
+3. modify the contour:
+    - edit with mouse drag or 
+    - erase holding "Alt"
+4. finalize it
+    - accept with pressing "q" or
+    - reject with pressing "Ctrl" + "Del"
+
+- if the suggested contour is a merge of multiple objects, you can erase the dividing line around the object you wish to keep, and keep erasing (or splitting with the eraser) until the object you wish to keep is the largest, then press "q" to accept it
+- this mode requires a Keras model to be present in the [model folder](#configure-model-folder)
+
+Click to watch demo video below
 
 [![contour-assist-demo](https://drive.google.com/uc?export=view&id=1xAGJu1SeM3mxMgxTQ-uIBECDEFNZL-8L)](https://drive.google.com/uc?export=view&id=1VTd6RScjNfAwi3vMk-bU87U4ucPmOO_M "Click to watch contour assist demo")
 
-### Edit mode
-- allows to modify created objects with a brush tool
-    1. select an object (shape) to modify by clicking on it
-    2. an editing layer (labels layer) is created for painting automatically
-    3. modify the contour:
-        - edit with mouse drag or 
-        - erase holding "Alt"
-    4. finalize it
-        - accept with pressing "q" or
-        - delete with pressing "Ctrl" + "Del"
-        - revert changes with pressing "Esc" (to the state before editing)
-- click to watch demo below
+***
+## Edit mode
+Allows to modify created objects with a brush tool.
+
+1. select an object (shape) to modify by clicking on it
+2. an editing layer (labels layer) is created for painting automatically
+3. modify the contour:
+    - edit with mouse drag or 
+    - erase holding "Alt"
+4. finalize it
+    - accept with pressing "q" or
+    - delete with pressing "Ctrl" + "Del" or
+    - revert changes with pressing "Esc" (to the state before editing)
+
+- if the edited contour is a merge of multiple objects, you can erase the dividing line around the object you wish to keep, and keep erasing (or splitting with the eraser) until the object you wish to keep is the largest, then press "q" to accept it
+
+Click to watch demo video below
 
 [![edit-mode-demo](https://drive.google.com/uc?export=view&id=1Mqjd6hdKyE24xXEOlyLO1yai3hnGSEyR)](https://drive.google.com/uc?export=view&id=10MQm53hblLKQlfBNrfUsi1vxvIdTbzCZ "Click to watch edit mode demo")
 
-### Class mode
-- allows to assign class labels to objects
-    1. select a class from the class list to assign
-    2. click on an object (shape) to assign the selected class label to it
-    3. the contour colour of the clicked object will be updated to selected the class colour, plus the class label is updated in the text properties of object (turn on "display text" on the layer control panel to see the text properties as `objectID:(classLabel)` e.g. 1:(0) for the first object)
+***
+## Class mode
+Allows to assign class labels to objects by clicking on shapes.
+
+1. select a class from the class list to assign
+2. click on an object (shape) to assign the selected class label to it
+3. the contour colour of the clicked object will be updated to the selected class colour, plus the class label is updated in the text properties of object (turn on "display text" on the layer control panel to see the text properties as `objectID:(classLabel)` e.g. 1:(0) for the first object)
+
 - optionally, you can set a default class for all currently unlabelled objects on the ROI (shapes) layer by selecting a class from the drop-down menu on the right to the text label "Default class"
 - class colours can be changed with the drop-down menu right to the class list; upon selection, all objects whose class label is the currently selected class will have their contour colour updated to the selected colour
 - clicking on an object that has already been assigned a class label will unclassify it: assign the label *0* to it
-- click to watch demo below (coming soon, screenshot only for now)
 
-![image](https://drive.google.com/uc?export=view&id=1sAuTTjPaFs_qlbIj3NQlht-UjI2WKsHr)
+Click to watch demo video below
+
+[![class-mode-demo](https://drive.google.com/uc?export=view&id=1sAuTTjPaFs_qlbIj3NQlht-UjI2WKsHr)](https://drive.google.com/uc?export=view&id=1uOmznUvfHEFvviWTtOnUHty8rkKyWR7Q "Click to watch class mode demo")
+
+***
+## Export
+See also: [Quick export](#quick-export)
+
+The exporter plugin AnnotatorJExport can be invoked from the Plugins menu under the plugin name `napari-annotatorj`. It is used for batch export of annotations to various formats directly suitable to train different types of deep learning models. See a demonstrative figure in the [AnnotatorJ repository](https://raw.githubusercontent.com/spreka/annotatorj/master/demos/annotation_and_export_types.png) and further description in its [README](https://github.com/spreka/annotatorj#export) or [documentation](https://github.com/spreka/annotatorj/blob/master/AnnotatorJ_documentation.pdf).
+
+1. browse original image folder with the "Browse original..." button
+2. browse annotation folder with the "Browse annot..." button
+3. select the export options you wish to export the annotations to (see tooltips on hover for help)
+    - at least one export option must be selected to start export
+    - (optional) right click on the checkbox "Coordinates" to switch between the default COCO format and YOLO format; see [explanation](#coordinate-formats)
+4. click on "Export masks" to start the export
+    - this will open a progress bar in the napari window and close it upon finish
+
+The folder structure required by the exporter is as follows:
+
+```
+image_folder
+	|--- image1.png
+	|--- another_image.png
+	|--- something.png
+	|--- ...
+
+annotation_folder
+	|--- image1_ROIs.zip
+	|--- another_image_ROIs.zip
+	|--- something_ROIs.zip
+	|--- ...
+```
+
+Multiple export options can be selected at once, any selected will create a subfolder in the folder where the annotations are saved.
+
+***
+## Quick export
+Click on the "[^]" button to quickly save annotations and export to mask image. It saves the current annotations (shapes) to an ImageJ-compatible roi.zip file and a generated a 16-bit multi-labelled mask image to the subfolder "masks" under the current original image's folder.
 
 
+***
+## Coordinate formats
+In the AnnotatorJExport plugin 2 coordinates formats can be selecting by right clicking on the Coordinates checkbox: COCO or YOLO. The default is COCO.
+
+*COCO format*:
+- `[x, y, width, height]` based on the top-left corner of the bounding box around the object
+- coordinates are not normalized
+- annotations are saved with header to 
+    - .csv file
+    - tab delimeted
+
+*YOLO format*:
+- `[class, x, y, width, height]` based on the center point of the bounding box around the object
+- coordinates are normalized to the image size as floating point values between 0 and 1
+- annotations are saved with header to
+    - .txt file
+    - whitespace delimeted
+    - class is saved as the 1st column
+
+***
+## Overlay
+A separate annotation file can be loaded as overlay for convenience, e.g. to compare annotations.
+
+1. load another annotation file with the "Overlay" button
+
+- (optional) switch its visibility with the "Show overlay" checkbox
+- (optional) change the contour colour of the overlay shapes with the ["Colours" button](#change-colours)
+
+***
+## Change colours
+Clicking on the "Colours" button opens the Colours widget where you can set the annotation and overlay colours.
+
+1. select a colour from the drop-down list either next to the text label "overlay" or "annotation"
+2. click the "Ok" button to apply changes
+
+- contour colour of shapes on the annotation shapes layer (named "ROI") that already have a class label assigned to them will **not** be updated to the new annotation colour, only those not having a class label (the class label can be displayed with the "display text" checkbox on the layer controls panel as `objectID:(classLabel)` e.g. 1:(0) for the first object)
+- contour colour of shapes on the overlay shapes layer (named "overlay") will all have the overlay colour set, regardless of any existing class information saved to the annotation file loaded as overlay
+
+***
+## Configure model folder
+The Contour assist mode imports a pre-trained Keras model from a folder named *models* under exactly the path *napari_annotatorj*. When bulding from source this is located at *path\to\napari-annotatorj\src\napari_annotatorj\models* whereas installing from pypi it is located at *path\to\virtualenv\Lib\site-packages\napari_annotatorj\models*.
+A pre-trained model for nucleus segmentation can be downloaded from the [GitHub repository of the ImageJ version of AnnotatorJ](https://github.com/spreka/annotatorj/releases/tag/v0.0.2-model).
+
+The model must be in either of these file formats:
+- config .json file + weights file: *model_real.json* and *model_real_weights.h5*
+- combined weights file: *model_real.hdf5*
+
+You can also train a new model on your own data in e.g. Python and save it with this code block:
+
+```python
+	# save model as json
+	model_json=model.to_json()
+	with open(‘model_real.json’, ‘w’) as f:
+		f.write(model_json)
+	
+	# save weights too
+	model.save_weights(‘model_real_weights.h5’)
+
+```
+This configuration will change in the next release to allow model browse and custom model name in an options widget.
+
+***
 ## Contributing
 
 Contributions are very welcome. Tests can be run with [tox], please ensure

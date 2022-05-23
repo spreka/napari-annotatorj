@@ -4000,6 +4000,7 @@ class ExportFrame(QWidget):
         self.exportDone=False
         self.originalFolder=None
         self.annotationFolder=None
+        self.annotEdgeWidth=1.0
 
         # browse buttons
         self.btnBrowseOrig=QPushButton('Browse original ...')
@@ -4012,10 +4013,10 @@ class ExportFrame(QWidget):
         # text fields
         self.textFieldOrig=QLineEdit()
         self.textFieldOrig.setToolTip('original images folder')
-        self.textFieldOrig.editingFinished.connect(self.initializeOrigFolderOpening)
+        self.textFieldOrig.editingFinished.connect(self.setOrigFolder)
         self.textFieldROI=QLineEdit()
         self.textFieldROI.setToolTip('annotation zips folder')
-        self.textFieldROI.editingFinished.connect(self.initializeROIFolderOpening)
+        self.textFieldROI.editingFinished.connect(self.setROIFolder)
 
         # export options
         self.lblNewLabel=QLabel('Export options')
@@ -4191,6 +4192,27 @@ class ExportFrame(QWidget):
         self.startedOrig=True
         if self.startedROI:
             self.started=True
+
+
+    def setOrigFolder(self):
+        self.originalFolder=self.textFieldOrig.text()
+        if os.path.isdir(self.originalFolder):
+            print('Opened original image folder: {}'.format(self.originalFolder))
+        else:
+            print('Failed to open original image folder')
+            return
+        self.initializeOrigFolderOpening(self.originalFolder)
+
+
+    def setROIFolder(self):
+        self.annotationFolder=self.textFieldROI.text()
+        if os.path.isdir(self.annotationFolder):
+            print('Opened annotation folder: {}'.format(self.annotationFolder))
+            self.textFieldROI.setText(self.annotationFolder)
+        else:
+            print('Failed to open annotation folder')
+            return
+        self.initializeROIFolderOpening(self.annotationFolder)
 
 
     def initializeROIFolderOpening(self,annotationFolder):
