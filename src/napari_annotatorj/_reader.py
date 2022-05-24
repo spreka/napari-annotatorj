@@ -10,6 +10,7 @@ Replace code below accordingly.  For complete documentation see:
 https://napari.org/docs/dev/plugins/for_plugin_developers.html
 """
 import numpy as np
+import skimage.io
 import os
 
 # supported image formats:
@@ -66,7 +67,13 @@ def reader_function(path):
         Both "meta", and "layer_type" are optional. napari will default to
         layer_type=="image" if not provided
     """
-    data = path
+    #data = path
+    # handle both a string and a list of strings
+    paths = [path] if isinstance(path, str) else path
+    # load all files into array
+    arrays = [skimage.io.imread(_path) for _path in paths]
+    # stack arrays into single array
+    data = np.squeeze(np.stack(arrays))
 
     # optional kwargs for the corresponding viewer.add_* method
     add_kwargs = {}

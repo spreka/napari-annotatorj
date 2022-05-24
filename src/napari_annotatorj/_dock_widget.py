@@ -25,6 +25,7 @@ from cv2 import cv2
 from copy import deepcopy,copy
 #from napari.qt import create_worker #thread_worker
 from napari.qt.threading import thread_worker #create_worker
+from tqdm import tqdm
 
 # suppress numpy's FutureWarning: numpy\core\numeric.py:2449: FutureWarning: elementwise comparison failed; returning scalar instead, but in the future will perform elementwise comparison!
 warnings.filterwarnings('ignore', category=FutureWarning)
@@ -96,7 +97,11 @@ class AnnotatorJ(QWidget):
         self.modelJsonFile='model_real'
         self.modelWeightsFile='model_real_weights.h5'
         self.modelFullFile='model_real.hdf5'
-        self.modelFolder=os.path.join(os.path.dirname(__file__),'models')
+        #self.modelFolder=os.path.join(os.path.dirname(__file__),'models')
+        # init model folder opening
+        self.modelFolder=self.initModelFolder()
+        self.modelReleaseUrl='https://github.com/spreka/annotatorj/releases/download/v0.0.2-model/models.zip'
+        self.DownloadProgressBar=None
         self.selectedCorrMethod=0 # U-Net
         self.invertedROI=None
         self.curPredictionImage=None
@@ -828,6 +833,72 @@ class AnnotatorJ(QWidget):
             s=s+('%02x' % int(k))
         print(s)
         return s
+
+
+    def initModelFolder(self):
+        # return a path where Keras U-Net models are located
+        defModelPath=os.path.join(os.path.dirname(__file__),'models')
+        if os.path.isdir(defModelPath):
+            pass
+        else:
+            # try to use a user folder
+            userHome=os.path.expanduser("~") 
+            defModelPath=os.path.join(userHome,'.napari_annotatorj','models')
+            if os.path.isdir(defModelPath):
+                pass
+            else:
+                # create it
+                try:
+                    os.makedirs(defModelPath)
+                except Exception as e:
+                    print(e)
+                if not os.path.isdir(defModelPath):
+                    print(f'Failed to create model folder: {defModelPath}')
+                    defModelPath=None
+                else:
+                    print(f'Created model folder: {defModelPath}')
+                    pass
+        return defModelPath
+
+
+    def downloadModelRelease(self,):
+        # download models.zip from repo
+        import urllib.request
+        #from napari.utils import progress
+        modelFolderRoot=os.path.dirname(self.modelFolder)
+        print(f'Downloading model file...')
+        try:
+            with DownloadProgressBar(unit='B', unit_scale=True, unit_divisor=1024, miniters=1,
+              desc='model download') as t:
+                urllib.request.urlretrieve(self.modelReleaseUrl,filename=os.path.join(modelFolderRoot,'models.zip'),reporthook=t.update_to)
+                t.total=t.n
+        except Exception as e:
+            print(e)
+
+        # extract archive
+        import zipfile
+        modelZipFile=os.path.join(modelFolderRoot,'models.zip')
+        if os.path.isfile(modelZipFile):
+            print(f'Extracting model files from .zip archive...')
+            with zipfile.ZipFile(modelZipFile, 'r') as modelZip:
+                modelZip.extractall(modelFolderRoot)
+        else:
+            print(f'Model zip file "models.zip" does not exist in location {modelFolderRoot}')
+            return None,None
+
+        modelName='model_real'
+        importMode=-1
+        # check if the correct files exist in the model folder
+        if os.path.isfile(os.path.join(self.modelFolder,modelName+'.json')) and os.path.isfile(os.path.join(self.modelFolder,modelName+'_weights.h5')):
+            print('  >> importing from json config + weights .h5 files...')
+            importMode=0
+        elif os.path.isfile(os.path.join(self.modelFolder,modelName+'.hdf5')):
+            print('  >> importing from a single .hdf5 file...')
+            importMode=1
+        else:
+            return None,None
+        print(f'Downloaded pre-trained model successfully to: {self.modelFolder}')
+        return modelName,importMode
 
 
     def findROIlayer(self,setLayer=False,layerName='ROI',quiet=False):
@@ -2042,7 +2113,10 @@ class AnnotatorJ(QWidget):
                 importMode=1
             else:
                 print(f'Model file {self.modelJsonFile} [.json and _weights.h5, or .hdf5] does not exist in model folder {self.modelFolder}')
-                return None
+                # try to download it from the original AnnotatorJ repo's releases
+                self.modelJsonFile,importMode=self.downloadModelRelease()
+                if self.modelJsonFile is None:
+                    return None
         #from .predict_unet import callPredictUnet,callPredictUnetLoaded,loadUnetModel
         #from .predict_unet import loadUnetModel
         # help the manual startup script import:
@@ -4426,7 +4500,7 @@ class ExportFrame(QWidget):
 
         # set progressbar length
         from napari.utils import progress
-        from time import sleep
+        #from time import sleep
         #self.progressBar.setMaximum(annotFileCount)
 
         # for annot time saving
@@ -5396,4 +5470,24 @@ class ExportFrame(QWidget):
 
 # -------------------------------------
 # end of class ExportFrame
+# -------------------------------------
+
+
+class DownloadProgressBar(tqdm):
+    """Provides `update_to(n)` which uses `tqdm.update(delta_n)`."""
+    def update_to(self, b=1, bsize=1, tsize=None):
+        """
+        b  : int, optional
+            Number of blocks transferred so far [default: 1].
+        bsize  : int, optional
+            Size of each block (in tqdm units) [default: 1].
+        tsize  : int, optional
+            Total size (in tqdm units). If [default: None] remains unchanged.
+        """
+        if tsize is not None:
+            self.total = tsize
+        return self.update(b * bsize - self.n)  # also sets self.n = b * bsize
+
+# -------------------------------------
+# end of class DownloadProgressBar
 # -------------------------------------

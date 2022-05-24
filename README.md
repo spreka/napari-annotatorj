@@ -136,10 +136,14 @@ Click to watch demo video below
 ## Export
 See also: [Quick export](#quick-export)
 
-The exporter plugin AnnotatorJExport can be invoked from the Plugins menu under the plugin name `napari-annotatorj`. It is used for batch export of annotations to various formats directly suitable to train different types of deep learning models. See a demonstrative figure in the [AnnotatorJ repository](https://raw.githubusercontent.com/spreka/annotatorj/master/demos/annotation_and_export_types.png) and further description in its [README](https://github.com/spreka/annotatorj#export) or [documentation](https://github.com/spreka/annotatorj/blob/master/AnnotatorJ_documentation.pdf).
+The exporter plugin AnnotatorJExport can be invoked from the Plugins menu under the plugin name `napari-annotatorj`. It is used for batch export of annotations to various formats directly suitable to train different types of deep learning models. See a [demonstrative figure](https://raw.githubusercontent.com/spreka/annotatorj/master/demos/annotation_and_export_types.png) in the [AnnotatorJ repository](https://github.com/spreka/annotatorj) and further description in its [README](https://github.com/spreka/annotatorj#export) or [documentation](https://github.com/spreka/annotatorj/blob/master/AnnotatorJ_documentation.pdf).
 
-1. browse original image folder with the "Browse original..." button
-2. browse annotation folder with the "Browse annot..." button
+1. browse original image folder with either the
+    - "Browse original..." button or
+    - text input field next to it
+2. browse annotation folder with either the
+    - "Browse annot..." button or
+    - text input field next to it
 3. select the export options you wish to export the annotations to (see tooltips on hover for help)
     - at least one export option must be selected to start export
     - (optional) right click on the checkbox "Coordinates" to switch between the default COCO format and YOLO format; see [explanation](#coordinate-formats)

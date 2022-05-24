@@ -3,7 +3,7 @@ schema_version: 0.1.0
 contributions:
   commands:
   - id: napari-annotatorj.AnnotatorJ
-    title: Create Annotator J
+    title: Create AnnotatorJ
     python_name: napari_annotatorj._dock_widget:AnnotatorJ
   - id: napari-annotatorj.get_reader
     title: Get Reader
