@@ -505,6 +505,21 @@ class AnnotatorJ(QWidget):
             if os.path.exists(self.test_rois):
                 rois=ImagejRoi.fromfile(self.test_rois)
                 print('Test roi file read successfully')
+                
+                shapesLayer=self.extractROIdata(rois)
+                self.viewer.add_layer(shapesLayer)
+                self.findROIlayer(True)
+                print('Loaded {} ROIs successfully'.format(len(rois)))
+
+                # select the "select shape" mode from the controls by default
+                #shapesLayer.mode = 'select'
+                # select the "add polygon" mode from the controls by default to enable freehand ROI drawing
+                shapesLayer.mode = 'add_polygon'
+
+                self.addFreeROIdrawing(shapesLayer)
+                self.addKeyBindings(shapesLayer)
+
+                self.viewer.reset_view()
             else:
                 print('Test roi file could not be found')
         else:
@@ -561,26 +576,26 @@ class AnnotatorJ(QWidget):
 
                 self.viewer.reset_view()
 
-            self.loadedROI=True
-            roiLayer=self.findROIlayer()
-            curROInum=len(roiLayer.data)
-            print('After loading we have '+str(curROInum)+' contours')
-            self.roiCount=curROInum
+        self.loadedROI=True
+        roiLayer=self.findROIlayer()
+        curROInum=len(roiLayer.data)
+        print('After loading we have '+str(curROInum)+' contours')
+        self.roiCount=curROInum
 
-            # rename the loaded contours if there were previous contours added
-            # TODO
+        # rename the loaded contours if there were previous contours added
+        # TODO
 
-            # check if the rois have class info saved
-            isClassified=False
-            for idx,r in enumerate(roiLayer.data):
-                if roiLayer.properties['class'][idx]>0:
-                    isClassified=True
-                    break
+        # check if the rois have class info saved
+        isClassified=False
+        for idx,r in enumerate(roiLayer.data):
+            if roiLayer.properties['class'][idx]>0:
+                isClassified=True
+                break
 
-            if isClassified:
-                # set class vars accordingly
-                # TODO: set the vars
-                self.startedClassifying=True
+        if isClassified:
+            # set class vars accordingly
+            # TODO: set the vars
+            self.startedClassifying=True
 
 
     def loadROIs2(self):
@@ -1051,6 +1066,10 @@ class AnnotatorJ(QWidget):
 
     def setTestMode(self,mode=False):
         self.testMode=mode
+        if mode==True:
+            self.defDir=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),'demo')
+            print(f'Set input image folder to {self.defDir} in testMode')
+            self.defFile='img.png'
 
     def saveData(self):
         # open a save dialog and save the rois to an imagej compatible roi.zip file
