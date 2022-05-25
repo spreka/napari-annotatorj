@@ -505,7 +505,7 @@ class AnnotatorJ(QWidget):
             if os.path.exists(self.test_rois):
                 rois=ImagejRoi.fromfile(self.test_rois)
                 print('Test roi file read successfully')
-                
+
                 shapesLayer=self.extractROIdata(rois)
                 self.viewer.add_layer(shapesLayer)
                 self.findROIlayer(True)
@@ -1890,9 +1890,9 @@ class AnnotatorJ(QWidget):
 
         # construct mask file name
         # set output folder and create it
-        selectedClass='masks'
+        #selectedClass='masks'
         mainExportFolder='labelled_masks'
-        exportFolder=os.path.join(self.defDir,selectedClass,mainExportFolder)
+        exportFolder=os.path.join(self.defDir,self.selectedClass,mainExportFolder)
         os.makedirs(exportFolder,exist_ok=True)
         print('Created output folder: {}'.format(exportFolder))
         maskFileName=str(os.path.join(exportFolder,'{}.tiff'.format(os.path.splitext(self.defFile)[0])))

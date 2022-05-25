@@ -1,43 +1,124 @@
-# napari-annotatorj
 
-[![License](https://img.shields.io/pypi/l/napari-annotatorj.svg?color=green)](https://github.com/spreka/napari-annotatorj/raw/main/LICENSE)
-[![PyPI](https://img.shields.io/pypi/v/napari-annotatorj.svg?color=green)](https://pypi.org/project/napari-annotatorj)
-[![Python Version](https://img.shields.io/pypi/pyversions/napari-annotatorj.svg?color=green)](https://python.org)
-[![tests](https://github.com/spreka/napari-annotatorj/workflows/tests/badge.svg)](https://github.com/spreka/napari-annotatorj/actions)
-[![codecov](https://codecov.io/gh/spreka/napari-annotatorj/branch/main/graph/badge.svg)](https://codecov.io/gh/spreka/napari-annotatorj)
-[![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/napari-annotatorj)](https://napari-hub.org/plugins/napari-annotatorj)
 
-The napari adaptation of the ImageJ/Fiji plugin [AnnotatorJ](https://github.com/spreka/annotatorj) for easy image annotation.
+<!-- This file is designed to provide you with a starting template for documenting
+the functionality of your plugin. Its content will be rendered on your plugin's
+napari hub page.
+
+The sections below are given as a guide for the flow of information only, and
+are in no way prescriptive. You should feel free to merge, remove, add and 
+rename sections at will to make this document work best for your plugin. 
+
+# Description
+
+This should be a detailed description of the context of your plugin and its 
+intended purpose.
+
+If you have videos or screenshots of your plugin in action, you should include them
+here as well, to make them front and center for new users. 
+
+You should use absolute links to these assets, so that we can easily display them 
+on the hub. The easiest way to include a video is to use a GIF, for example hosted
+on imgur. You can then reference this GIF as an image.
+
+![Example GIF hosted on Imgur](https://i.imgur.com/A5phCX4.gif)
+
+Note that GIFs larger than 5MB won't be rendered by GitHub - we will however,
+render them on the napari hub.
+
+The other alternative, if you prefer to keep a video, is to use GitHub's video
+embedding feature.
+
+1. Push your `DESCRIPTION.md` to GitHub on your repository (this can also be done
+as part of a Pull Request)
+2. Edit `.napari/DESCRIPTION.md` **on GitHub**.
+3. Drag and drop your video into its desired location. It will be uploaded and
+hosted on GitHub for you, but will not be placed in your repository.
+4. We will take the resolved link to the video and render it on the hub.
+
+Here is an example of an mp4 video embedded this way.
+
+https://user-images.githubusercontent.com/17995243/120088305-6c093380-c132-11eb-822d-620e81eb5f0e.mp4
+
+# Intended Audience & Supported Data
+
+This section should describe the target audience for this plugin (any knowledge,
+skills and experience required), as well as a description of the types of data
+supported by this plugin.
+
+Try to make the data description as explicit as possible, so that users know the
+format your plugin expects. This applies both to reader plugins reading file formats
+and to function/dock widget plugins accepting layers and/or layer data.
+For example, if you know your plugin only works with 3D integer data in "tyx" order,
+make sure to mention this.
+
+If you know of researchers, groups or labs using your plugin, or if it has been cited
+anywhere, feel free to also include this information here.
+
+# Quickstart
+
+This section should go through step-by-step examples of how your plugin should be used.
+Where your plugin provides multiple dock widgets or functions, you should split these
+out into separate subsections for easy browsing. Include screenshots and videos
+wherever possible to elucidate your descriptions. 
+
+Ideally, this section should start with minimal examples for those who just want a
+quick overview of the plugin's functionality, but you should definitely link out to
+more complex and in-depth tutorials highlighting any intricacies of your plugin, and
+more detailed documentation if you have it.
+
+# Additional Install Steps (uncommon)
+We will be providing installation instructions on the hub, which will be sufficient
+for the majority of plugins. They will include instructions to pip install, and
+to install via napari itself.
+
+Most plugins can be installed out-of-the-box by just specifying the package requirements
+over in `setup.cfg`. However, if your plugin has any more complex dependencies, or 
+requires any additional preparation before (or after) installation, you should add 
+this information here.
+
+# Getting Help
+
+This section should point users to your preferred support tools, whether this be raising
+an issue on GitHub, asking a question on image.sc, or using some other method of contact.
+If you distinguish between usage support and bug/feature support, you should state that
+here.
+
+# How to Cite
+
+Many plugins may be used in the course of published (or publishable) research, as well as
+during conference talks and other public facing events. If you'd like to be cited in
+a particular format, or have a DOI you'd like used, you should provide that information here. -->
+
+# Description
+This plugin allows easy object annotation on 2D images. Annotation is made quick, easy and fun, just start drawing! See a [quick start](#quick-start) guide below.
 
 ![image](https://drive.google.com/uc?export=view&id=1fVfvanffTdrXvLE0m1Yo6FV5TAjh6sb2)
 
-----------------------------------
+It is the napari version of the ImageJ plugin [AnnotatorJ](https://github.com/spreka/annotatorj).
 
-This [napari] plugin was generated with [Cookiecutter] using with [@napari]'s [cookiecutter-napari-plugin] template.
+## What kind of data it works on
+**2D images**. That's the only requirement. Whether you have microscopy images of cells or tissue, natural photos of cats and dogs, vehichle dash-cam footage, industrial pipeline monitoring etc., just open the image and you can start annotating.
 
-<!--
-Don't miss the full getting started guide to set up your new package:
-https://github.com/napari/cookiecutter-napari-plugin#getting-started
+Annotations are save to ImageJ-compatible roi.zip files. [Export](#export) is possible to several file formats depending on the intended application.
 
-and review the napari docs for plugin developers:
-https://napari.org/docs/plugins/index.html
--->
+## Intended users
+**Anyone**. No experience in computer science or underlying technology is needed; if you know how to use MS Paint, you are ready to start annotating. Biologists, programmers, even children can use it. See [quick start](#quick-start) guide or [demos](#demo). If you experience any issues or have questions, feel free to open an [issue](https://github.com/spreka/napari-annotatorj/issues) on GitHub.
 
-## Installation
+## Main features
 
-You can install `napari-annotatorj` via [pip]:
+Why choose napari-annotatorj?
+- Assisted annotation is possible with automatic deep learning-based [contour suggestion](#contour-assist-mode),
+- freehand contour drawing in [instance annotation](#instance-annotation),
+- shape [editing](#edit-mode) via painting labels,
+- [class annotation](#class-mode),
+- [export](#export) to formats directly suitable for deep CNN training
+- import of previous annotations as [overlay](#overlay); e.g. when comparing annotations or curating
+- and more.
 
-    pip install napari-annotatorj
+See [demos](#demo).
 
-
-
-To install latest development version :
-
-    pip install git+https://github.com/spreka/napari-annotatorj.git
-
-
-***
-## Intro
+# Quick start
+Demo data is available in the GitHub repository's [demo](https://github.com/spreka/napari-annotatorj/tree/main/demo) folder.
 
 napari-annotatorj has several convenient functions to speed up the annotation process, make it easier and more fun. These *modes* can be activated by their corresponding checkboxes on the left side of the main AnnotatorJ widget.
 
@@ -48,9 +129,17 @@ napari-annotatorj has several convenient functions to speed up the annotation pr
 
 Freehand drawing is enabled in the plugin. The "Add polygon" tool is selected by default upon startup. To draw a freehand object (shape) simply hold the mouse and drag it around the object. The contour is visualized when the mouse button is released.
 
-See the [guide](#how-to-annotate) below for a quick start or a [demo](#demo).
+See the [guide](#how-to-annotate) below or a [demo](#demo-scripts) script.
 
-***
+## Instance annotation
+Allows freehand drawing of object contours (shapes) with the mouse as in ImageJ.
+
+Shape contour points are tracked automatically when the left mouse button is held and dragged to draw a shape. The shape is closed when the mouse button is released, automatically, and added to the default shapes layer (named "ROI"). In direct selection mode (from the layer controls panel), you can see the saved contour points. The slower you drag the mouse, the more contour points saved, i.e. the more refined your contour will be.
+
+Click to watch demo video below.
+
+[![instance-annot-demo](https://drive.google.com/uc?export=view&id=1Qd0LirjJX1Gvy_NWJ2eBV74vQjDQt5Gn)](https://drive.google.com/uc?export=view&id=18bIaqNboGMAwEN_bBnPnyXEbkAgNBmQ0)
+
 ## How to annotate
 
 1. Open --> opens an image
@@ -76,17 +165,12 @@ See the [guide](#how-to-annotate) below for a quick start or a [demo](#demo).
 		- Class mode --> assigns the selected class to the selected contour in the ROI list by clicking on it on the image and displays its contour in the class's colour (can be set in the Class window); clicking on the object a second time unclassifies it
 	- [^] --> quick export in 16-bit multi-labelled .tiff format; if classified, also exports by classes
 
-***
-## Instance annotation
-Allows freehand drawing of object contours (shapes) with the mouse as in ImageJ.
 
-Shape contour points are tracked automatically when the left mouse button is held and dragged to draw a shape. The shape is closed when the mouse button is released, automatically, and added to the default shapes layer (named "ROI"). In direct selection mode (from the layer controls panel), you can see the saved contour points. The slower you drag the mouse, the more contour points saved, i.e. the more refined your contour will be.
 
-Click to watch demo video below.
+# Demo
+## Instance annotation mode
+See [above](#instance-annotation).
 
-[![instance-annot-demo](https://drive.google.com/uc?export=view&id=1Qd0LirjJX1Gvy_NWJ2eBV74vQjDQt5Gn)](https://drive.google.com/uc?export=view&id=18bIaqNboGMAwEN_bBnPnyXEbkAgNBmQ0)
-
-***
 ## Contour assist mode
 Assisted annotation via a pre-trained deep learning model's suggested contour.
 
@@ -106,7 +190,7 @@ Click to watch demo video below
 
 [![contour-assist-demo](https://drive.google.com/uc?export=view&id=1xAGJu1SeM3mxMgxTQ-uIBECDEFNZL-8L)](https://drive.google.com/uc?export=view&id=1VTd6RScjNfAwi3vMk-bU87U4ucPmOO_M "Click to watch contour assist demo")
 
-***
+
 ## Edit mode
 Allows to modify created objects with a brush tool.
 
@@ -126,7 +210,7 @@ Click to watch demo video below
 
 [![edit-mode-demo](https://drive.google.com/uc?export=view&id=1Mqjd6hdKyE24xXEOlyLO1yai3hnGSEyR)](https://drive.google.com/uc?export=view&id=10MQm53hblLKQlfBNrfUsi1vxvIdTbzCZ "Click to watch edit mode demo")
 
-***
+
 ## Class mode
 Allows to assign class labels to objects by clicking on shapes.
 
@@ -142,7 +226,7 @@ Click to watch demo video below
 
 [![class-mode-demo](https://drive.google.com/uc?export=view&id=1sAuTTjPaFs_qlbIj3NQlht-UjI2WKsHr)](https://drive.google.com/uc?export=view&id=1uOmznUvfHEFvviWTtOnUHty8rkKyWR7Q "Click to watch class mode demo")
 
-***
+
 ## Export
 See also: [Quick export](#quick-export)
 
@@ -178,12 +262,11 @@ annotation_folder
 
 Multiple export options can be selected at once, any selected will create a subfolder in the folder where the annotations are saved.
 
-***
+
 ## Quick export
 Click on the "[^]" button to quickly save annotations and export to mask image. It saves the current annotations (shapes) to an ImageJ-compatible roi.zip file and a generated a 16-bit multi-labelled mask image to the subfolder "masks" under the current original image's folder.
 
 
-***
 ## Coordinate formats
 In the AnnotatorJExport plugin 2 coordinates formats can be selecting by right clicking on the Coordinates checkbox: COCO or YOLO. The default is COCO.
 
@@ -202,7 +285,7 @@ In the AnnotatorJExport plugin 2 coordinates formats can be selecting by right c
     - whitespace delimeted
     - class is saved as the 1st column
 
-***
+
 ## Overlay
 A separate annotation file can be loaded as overlay for convenience, e.g. to compare annotations.
 
@@ -211,7 +294,7 @@ A separate annotation file can be loaded as overlay for convenience, e.g. to com
 - (optional) switch its visibility with the "Show overlay" checkbox
 - (optional) change the contour colour of the overlay shapes with the ["Colours" button](#change-colours)
 
-***
+
 ## Change colours
 Clicking on the "Colours" button opens the Colours widget where you can set the annotation and overlay colours.
 
@@ -221,7 +304,22 @@ Clicking on the "Colours" button opens the Colours widget where you can set the 
 - contour colour of shapes on the annotation shapes layer (named "ROI") that already have a class label assigned to them will **not** be updated to the new annotation colour, only those not having a class label (the class label can be displayed with the "display text" checkbox on the layer controls panel as `objectID:(classLabel)` e.g. 1:(0) for the first object)
 - contour colour of shapes on the overlay shapes layer (named "overlay") will all have the overlay colour set, regardless of any existing class information saved to the annotation file loaded as overlay
 
-***
+
+# For coding users
+## Demo scripts
+Run a demo of napari-annotatorj with sample data: a small 3-channel RGB image as original image and an ImageJ roi.zip file as annotations loaded.
+
+```shell
+    # from the napari-annotatorj folder
+	python src/napari_annotatorj/load_imagej_roi.py
+```
+Alternatively, you can startup the napari-annotatorj plugin by running
+
+```shell
+    # from the napari-annotatorj folder
+	python src/napari_annotatorj/startup_annotatorj.py
+```
+
 ## Configure model folder
 The Contour assist mode imports a pre-trained Keras model from a folder named *models* under exactly the path *napari_annotatorj*. This is automatically created on the first startup in your user folder:
 - `C:\Users\Username\.napari_annotatorj` on Windows
@@ -249,22 +347,6 @@ You can also train a new model on your own data in e.g. Python and save it with 
 ```
 This configuration will change in the next release to allow model browse and custom model name in an options widget.
 
-***
-## Demo
-Run a demo of napari-annotatorj with sample data: a small 3-channel RGB image as original image and an ImageJ roi.zip file as annotations loaded.
-
-```shell
-    # from the napari-annotatorj folder
-	python src/napari_annotatorj/load_imagej_roi.py
-```
-Alternatively, you can startup the napari-annotatorj plugin by running
-
-```shell
-    # from the napari-annotatorj folder
-	python src/napari_annotatorj/startup_annotatorj.py
-```
-
-***
 ## Setting device for deep learning model prediction
 The [Contour assist](#contour-assist-mode) mode uses a pre-trained U-Net model for suggesting contours based on a lazily initialized contour drawn by the user. The default configuration loads and runs the model on the CPU so all users can run it. It is possible to switch to GPU if you have:
 - a CUDA-capable GPU in your computer
@@ -274,35 +356,12 @@ See installation guide on [nVidia's website](https://developer.nvidia.com/cuda-d
 
 To switch to GPU utilization, edit [_dock_widget.py](https://github.com/spreka/napari-annotatorj/blob/main/src/napari_annotatorj/_dock_widget.py#L112) and set to the device you would like to use. Valid values are `'cpu','0','1','2',...`. The default value is `cpu`. The default GPU device is `0` if your system has any CUDA-capable GPU. If the device you set cannot be found or utilized by the code, it will fall back to `cpu`. An informative message is printed to the console upon plugin startup.
 
-***
-## Contributing
+# License
+Distributed under the terms of the [BSD-3](https://opensource.org/licenses/BSD-3-Clause) license,
+"napari-annotatorj" is free and open source software.
 
-Contributions are very welcome. Tests can be run with [tox], please ensure
-the coverage at least stays the same before you submit a pull request.
+# Getting help
+If you experience any issues or have questions, feel free to open an [issue](https://github.com/spreka/napari-annotatorj/issues) on GitHub.
 
-## License
-
-Distributed under the terms of the [BSD-3] license,
-"napari-annotatorj" is free and open source software
-
-## Issues
-
-If you encounter any problems, please [file an issue] along with a detailed description.
-
-[napari]: https://github.com/napari/napari
-[Cookiecutter]: https://github.com/audreyr/cookiecutter
-[@napari]: https://github.com/napari
-[MIT]: http://opensource.org/licenses/MIT
-[BSD-3]: http://opensource.org/licenses/BSD-3-Clause
-[GNU GPL v3.0]: http://www.gnu.org/licenses/gpl-3.0.txt
-[GNU LGPL v3.0]: http://www.gnu.org/licenses/lgpl-3.0.txt
-[Apache Software License 2.0]: http://www.apache.org/licenses/LICENSE-2.0
-[Mozilla Public License 2.0]: https://www.mozilla.org/media/MPL/2.0/index.txt
-[cookiecutter-napari-plugin]: https://github.com/napari/cookiecutter-napari-plugin
-
-[file an issue]: https://github.com/spreka/napari-annotatorj/issues
-
-[napari]: https://github.com/napari/napari
-[tox]: https://tox.readthedocs.io/en/latest/
-[pip]: https://pypi.org/project/pip/
-[PyPI]: https://pypi.org/
+# How to cite
+Réka Hollandi, Ákos Diósdi, Gábor Hollandi, Nikita Moshkov, Péter Horváth (2020): “AnnotatorJ: an ImageJ plugin to ease hand-annotation of cellular compartments”, Molecular Biology of the Cell, Vol. 31, No. 20, 2179-2186, https://doi.org/10.1091/mbc.E20-02-0156
