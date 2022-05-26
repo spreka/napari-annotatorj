@@ -1430,8 +1430,18 @@ class AnnotatorJ(QWidget):
                     contour,hierarchy=cv2.findContours(filled.astype(numpy.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
                     if not (contour and len(contour)==1):
                         msg='Cannot create roi from this label'
-                        warnings.warn(msg)
-                        return None
+                        # try to find the largest contour in the list
+                        try:
+                            f=(lambda x: len(x))
+                            lengths=[f(c) for c in contour]
+                            contour=contour[lengths.index(max(lengths))]
+                        except Exception as e:
+                            print(e)
+                            warnings.warn(msg)
+                            return None
+                        msg=msg+' - selecting largest contour'
+                        print(msg)
+                        #return None
                 else:
                     msg='Cannot create roi from this label'
                     warnings.warn(msg)
@@ -2018,6 +2028,12 @@ class AnnotatorJ(QWidget):
                     self.origEditedROI=None
                     #if editManager is not None:
                     #    editManager.reset()
+
+                    # close overlay if any
+                    overlayLayer=self.findROIlayer(layerName='overlay')
+                    if overlayLayer is not None:
+                        # delete it
+                        self.viewer.layers.remove(overlayLayer)
 
 
             # check if image was passed as input argument

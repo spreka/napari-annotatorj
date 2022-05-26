@@ -117,7 +117,7 @@ Why choose napari-annotatorj?
 
 See [demos](#demo).
 
-# Quick start
+## Quick start
 Demo data is available in the GitHub repository's [demo](https://github.com/spreka/napari-annotatorj/tree/main/demo) folder.
 
 napari-annotatorj has several convenient functions to speed up the annotation process, make it easier and more fun. These *modes* can be activated by their corresponding checkboxes on the left side of the main AnnotatorJ widget.
@@ -167,7 +167,7 @@ Click to watch demo video below.
 
 
 
-# Demo
+## Demo
 ## Instance annotation mode
 See [above](#instance-annotation).
 
@@ -356,12 +356,12 @@ See installation guide on [nVidia's website](https://developer.nvidia.com/cuda-d
 
 To switch to GPU utilization, edit [_dock_widget.py](https://github.com/spreka/napari-annotatorj/blob/main/src/napari_annotatorj/_dock_widget.py#L112) and set to the device you would like to use. Valid values are `'cpu','0','1','2',...`. The default value is `cpu`. The default GPU device is `0` if your system has any CUDA-capable GPU. If the device you set cannot be found or utilized by the code, it will fall back to `cpu`. An informative message is printed to the console upon plugin startup.
 
-# License
+## License
 Distributed under the terms of the [BSD-3](https://opensource.org/licenses/BSD-3-Clause) license,
 "napari-annotatorj" is free and open source software.
 
-# Getting help
+## Getting help
 If you experience any issues or have questions, feel free to open an [issue](https://github.com/spreka/napari-annotatorj/issues) on GitHub.
 
-# How to cite
+## How to cite
 Réka Hollandi, Ákos Diósdi, Gábor Hollandi, Nikita Moshkov, Péter Horváth (2020): “AnnotatorJ: an ImageJ plugin to ease hand-annotation of cellular compartments”, Molecular Biology of the Cell, Vol. 31, No. 20, 2179-2186, https://doi.org/10.1091/mbc.E20-02-0156
