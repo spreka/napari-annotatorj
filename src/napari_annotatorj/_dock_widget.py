@@ -785,6 +785,17 @@ class AnnotatorJ(QWidget):
                     
                     curColour=self.classColourLUT[curClass]
                     roiColours.append(curColour)
+
+                    # store class info for the Classes widget
+                    if self.listModelClasses is None:
+                        self.listModelClasses=[]
+                        self.selectedClassNameNumber=1
+                        self.classFrameColours=[]
+                    newName='Class_{:02d}'.format(curClass)
+                    if newName not in self.listModelClasses and newName not in self.classFrameNames:
+                        self.listModelClasses.append(newName)
+                        self.classFrameNames.append(newName)
+                        self.classFrameColours.append(curClass-1)
                 else:
                     roiColours.append(self.overlayColour)
                 roiProps['class'].append(curClass)
