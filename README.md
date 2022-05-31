@@ -27,7 +27,8 @@ https://napari.org/docs/plugins/index.html
 
 You can install `napari-annotatorj` via [pip]:
 
-    pip install napari-annotatorj
+    pip install napari[all]
+	pip install napari-annotatorj
 
 
 
@@ -35,6 +36,12 @@ To install latest development version :
 
     pip install git+https://github.com/spreka/napari-annotatorj.git
 
+
+On Linux distributions, the following error may arise upon napari startup after the installation of the plugin: `Could not load the Qt platform plugin “xcb” in “” even though it was found`. In this case, the manual install of `libxcb-xinerama0` for Qt is required:
+
+	sudo apt install libxcb-xinerama0
+
+The bundled application version of [napari](https://github.com/napari/napari/releases) allows the pip install of plugins in the .zip distribution. After installation of this release, napari-annotatorj can be installed from the `Plugins --> Install/Uninstall plugins...` menu by searching for its name and clicking on the `Install` button next to it.
 
 ***
 ## Intro
@@ -54,11 +61,14 @@ See the [guide](#how-to-annotate) below for a quick start or a [demo](#demo).
 ## How to annotate
 
 1. Open --> opens an image
-2. Select annotation type (coming soon) --> a default tool is selected from the toolbar that fits the selected annotation type
+2. (Optionally) 
+	- ... --> Select annotation type --> Ok --> a default tool is selected from the toolbar that fits the selected annotation type
+	- The default annotation type is instance
+	- Selected annotation type is saved to a config file
 3. Start annotating objects
 	- [instance](#instance-annotation): draw contours around objects
-	- semantic (coming soon): paint the objects' area
-	- bounding box (coming soon): draw rectangles around the objects
+	- [semantic](#semantic-annotation): paint the objects' area
+	- [bounding box](#bounding-box-annotation): draw rectangles around the objects
 4. Save --> Select class --> saves the annotation to a file in a sub-folder of the original image folder with the name of the selected class
 
 5. (Optionally)
@@ -85,6 +95,18 @@ Shape contour points are tracked automatically when the left mouse button is hel
 Click to watch demo video below.
 
 [![instance-annot-demo](https://drive.google.com/uc?export=view&id=1Qd0LirjJX1Gvy_NWJ2eBV74vQjDQt5Gn)](https://drive.google.com/uc?export=view&id=18bIaqNboGMAwEN_bBnPnyXEbkAgNBmQ0)
+
+***
+## Semantic annotation
+Allows painting with the brush tool (labels).
+
+Useful for semantic (e.g. scene) annotation. Currently saves all labels to binary mask only (foreground-background).
+
+***
+## Bounding box annotation
+Allows drawing bounding boxes (shapes, rectangles) around objects with the mouse.
+
+Useful for object detection annotation.
 
 ***
 ## Contour assist mode

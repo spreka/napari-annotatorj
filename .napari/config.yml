@@ -1,0 +1,24 @@
+visibility: public
+summary: The napari adaptation of the ImageJ/Fiji plugin AnnotatorJ for easy and fun image annotation.
+authors:
+  - name: Reka Hollandi
+    orcid: 0000-0002-4052-6846
+labels:
+  ontology: EDAM-BIOIMAGING:alpha06
+  terms:
+  - Microscopy
+  - Fluorescence microscopy
+  - Confocal microscopy
+  - Electron microscopy
+  - Medical imaging
+  - 2D image
+  - Multi-channel image
+  - Image annotation
+  - Object detection
+  - Image segmentation
+  - Nucleus segmentation
+  - Cell segmentation
+  - Model-based segmentation
+  - Object classification
+  - Convolutional neural network
+  - Supervised learning

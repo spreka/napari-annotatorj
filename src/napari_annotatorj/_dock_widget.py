@@ -149,6 +149,26 @@ class AnnotatorJ(QWidget):
         self.cancelledSaving=False
         self.newClassActive=False
 
+        # options
+        self.optionsFrame=None
+        self.selectedAnnotationType='instance'
+        self.semanticSaving=False
+        self.paramFile='napari-annotatorj_config.json'
+        self.rememberAnnotType=True
+        self.saveOutlines=False
+        self.saveAnnotTimes=False
+
+        # read options from file if exists
+        self.initParams()
+
+        # for dock tabs
+        self.firstDockWidget=None
+        self.firstDockWidgetName=None
+        self.optionsWidget=None
+        self.coloursWidget=None
+        self.classesWidget=None
+        self.ExportWidget=None
+
 
         # get a list of the 9 basic colours also present in AnnotatorJ's class mode
         self.colours=['red','green','blue','cyan','magenta','yellow','orange','white','black']
@@ -187,7 +207,7 @@ class AnnotatorJ(QWidget):
         # options
         self.buttonOptions=QPushButton('...')
         self.buttonOptions.setToolTip('Show options')
-        #self.buttonOptions.clicked.connect(self.)
+        self.buttonOptions.clicked.connect(self.openOptionsFrame)
 
         self.btnColours=QPushButton('Colours')
         self.btnColours.setToolTip('Set colour for annotations or overlay')
@@ -927,6 +947,151 @@ class AnnotatorJ(QWidget):
         return modelName,importMode
 
 
+    def initParams(self):
+        optionsFile=os.path.join(self.modelFolder,self.paramFile)
+        import json
+        if not os.path.isfile(optionsFile):
+            print('Params file doesn\'t exist, loading default config:')
+            # defaults are already set in the class __init__ fcn
+            pass
+        else:
+            print(f'Found params file {optionsFile}, reading config...')
+            self.collectParams(setParams=True,readParams=True,paramsFile=optionsFile)
+
+        self.printConfig()
+
+
+    def collectParams(self,setParams=False,readParams=False,paramsFile=None):
+        if readParams and paramsFile is not None:
+            import json
+            try:
+                with open(paramsFile) as paramFile:
+                    jsonString=json.load(paramFile)
+                    #debug:
+                    print(jsonString)
+                    params=copy(jsonString)
+                    self.setParams(params)
+                    print('Read params:')
+            except Exception as e:
+                print(e)
+                print(f'Could not read json file {paramsFile}')
+                params=None
+        else:
+            params={
+                'defaultAnnotType': self.selectedAnnotationType,
+                'rememberAnnotTyperememberAnnotType': self.rememberAnnotType,
+                'defColour':self.defColour,
+                'overlayColor':self.overlayColour,
+                'classes':self.propsClassString,
+                'intensityThreshVal':self.intensityThreshVal,
+                'intensityThreshValR':self.intensityThreshValR,
+                'intensityThreshValG':self.intensityThreshValG,
+                'intensityThreshValB':self.intensityThreshValB,
+                'selectedCorrMethod':self.selectedCorrMethod,
+                'distanceThreshVal':self.distanceThreshVal,
+                'modelFullFile':self.modelFullFile,
+                'modelJsonFile':self.modelJsonFile,
+                'modelFolder':self.modelFolder,
+                'modelWeightsFile':self.modelWeightsFile,
+                'correctionBrushSize':self.correctionBrushSize,
+                'semanticBrushSize':self.semanticBrushSize,
+                'saveAnnotTimes':self.saveAnnotTimes,
+                'autoMaskLoad':self.autoMaskLoad,
+                'enableMaskLoad':self.enableMaskLoad,
+                'saveOutlines':self.saveOutlines,
+                'gpuSetting':self.gpuSetting
+            }
+
+        if setParams:
+            self.params=params
+        return params
+
+
+    def setParams(self,params):
+        if 'defaultAnnotType' in params:
+            validTypes=['instance','bbox','semantic']
+            if params['defaultAnnotType'] in validTypes:
+                self.selectedAnnotationType=params['defaultAnnotType']
+            else:
+                # set to default
+                self.selectedAnnotationType='instance'
+        if 'rememberAnnotTyperememberAnnotType' in params and isinstance(params['rememberAnnotTyperememberAnnotType'],bool):
+            self.rememberAnnotType=params['rememberAnnotTyperememberAnnotType']
+        if 'defColour' in params:
+            self.defColour=params['defColour']
+        if 'overlayColor' in params:
+            self.overlayColour=params['overlayColor']
+        if 'classes' in params:
+            self.propsClassString=params['classes']
+        if 'intensityThreshVal' in params:
+            self.intensityThreshVal=params['intensityThreshVal']
+        if 'intensityThreshValR' in params:
+            self.intensityThreshValR=params['intensityThreshValR']
+        if 'intensityThreshValG' in params:
+            self.intensityThreshValG=params['intensityThreshValG']
+        if 'intensityThreshValB' in params:
+            self.intensityThreshValB=params['intensityThreshValB']
+        if 'selectedCorrMethod' in params:
+            self.selectedCorrMethod=params['selectedCorrMethod']
+        if 'distanceThreshVal' in params:
+            self.distanceThreshVal=params['distanceThreshVal']
+        if 'modelFullFile' in params:
+            self.modelFullFile=params['modelFullFile']
+        if 'modelJsonFile' in params:
+            self.modelJsonFile=params['modelJsonFile']
+        if 'modelFolder' in params:
+            self.modelFolder=params['modelFolder']
+        if 'modelWeightsFile' in params:
+            self.modelWeightsFile=params['modelWeightsFile']
+        if 'correctionBrushSize' in params:
+            self.correctionBrushSize=params['correctionBrushSize']
+        if 'semanticBrushSize' in params:
+            self.semanticBrushSize=params['semanticBrushSize']
+        if 'saveAnnotTimes' in params and isinstance(params['saveAnnotTimes'],bool):
+            self.saveAnnotTimes=params['saveAnnotTimes']
+        if 'autoMaskLoad' in params and isinstance(params['autoMaskLoad'],bool):
+            self.autoMaskLoad=params['autoMaskLoad']
+        if 'enableMaskLoad' in params and isinstance(params['enableMaskLoad'],bool):
+            self.enableMaskLoad=params['enableMaskLoad']
+        if 'saveOutlines' in params and isinstance(params['saveOutlines'],bool):
+            self.saveOutlines=params['saveOutlines']
+        if 'gpuSetting' in params:
+            self.gpuSetting=params['gpuSetting']
+        return
+
+
+    def printConfig(self):
+        print(self.params)
+        return
+
+
+    def SaveNewProp(self,prop,val):
+        if self.params is None:
+            self.collectParams(setParams=True)
+
+        self.writeParams2File()
+
+
+    def writeParams2File(self):
+        optionsFile=os.path.join(self.modelFolder,self.paramFile)
+        import json
+        if not os.path.isfile(optionsFile):
+            # create it
+            print('Cannot find config file, createing it now...')
+        else:
+            # rewrite it
+            print(f'Found config file {optionsFile}, updating it now...')
+
+        with open(optionsFile,'w') as paramFile:
+            # write params to file
+            try:
+                json.dump(self.collectParams(setParams=True), paramFile,indent=4)
+                print('Successfully wrote config file with current settings')
+            except Exception as e:
+                print(e)
+                print('Could not write configs to file')
+
+
     def findROIlayer(self,setLayer=False,layerName='ROI',quiet=False):
         for x in self.viewer.layers:
             if (x.__class__ is Shapes and x.name==layerName):
@@ -1142,8 +1307,19 @@ class AnnotatorJ(QWidget):
 
         # set output file name according to annotation type:
         # TODO: add the others
-        # now we only have instance
-        roiFileName=str(os.path.join(destMaskFolder2,'{}_ROIs.zip'.format(os.path.splitext(os.path.basename(self.destNameRaw))[0])))
+        if self.selectedAnnotationType=='instance':
+            # now we only have instance
+            roiFileName=str(os.path.join(destMaskFolder2,'{}_ROIs.zip'.format(os.path.splitext(os.path.basename(self.destNameRaw))[0])))
+        elif self.selectedAnnotationType=='bbox':
+            roiFileName=str(os.path.join(destMaskFolder2,'{}_bboxes.zip'.format(os.path.splitext(os.path.basename(self.destNameRaw))[0])))
+        elif self.selectedAnnotationType=='semantic':
+            roiFileName=str(os.path.join(destMaskFolder2,'{}_semantic.tiff'.format(os.path.splitext(os.path.basename(self.destNameRaw))[0])))
+            self.semanticSaving=True
+
+        if not self.semanticSaving:
+            print('Set output ROI.zip name: {}'.format(roiFileName))
+        else:
+            print('Set output binary image name: {}'.format(roiFileName))
 
         # check if annotation already exists for this image with this class
         if os.path.exists(roiFileName):
@@ -1151,9 +1327,12 @@ class AnnotatorJ(QWidget):
             newFileNum=0
             while os.path.exists(roiFileName):
                 newFileNum+=1
-                roiFileName=str(os.path.join(destMaskFolder2,'{}_ROIs_{}.zip'.format(os.path.splitext(os.path.basename(self.destNameRaw))[0],newFileNum)))
-
-        print('Set output ROI.zip name: {}'.format(roiFileName))
+                if self.selectedAnnotationType=='instance':
+                    roiFileName=str(os.path.join(destMaskFolder2,'{}_ROIs_{}.zip'.format(os.path.splitext(os.path.basename(self.destNameRaw))[0],newFileNum)))
+                elif self.selectedAnnotationType=='bbox':
+                    roiFileName=str(os.path.join(destMaskFolder2,'{}_bboxes_{}.zip'.format(os.path.splitext(os.path.basename(self.destNameRaw))[0],newFileNum)))
+                elif self.selectedAnnotationType=='semantic':
+                    roiFileName=str(os.path.join(destMaskFolder2,'{}_semantic_{}.tiff'.format(os.path.splitext(os.path.basename(self.destNameRaw))[0],newFileNum)))
 
         # TODO: prepare the roi files from the shapes layers
         # viewer.layers[1].__class__ should yield napari.layers.shapes.shapes.Shapes
@@ -1172,14 +1351,29 @@ class AnnotatorJ(QWidget):
             print('Failed to save ROI: {}'.format(roiFileName))
         '''
 
-        # new way with roi list
-        rois2save=self.fetchShapes2ROIs()
-        if rois2save is None:
-            # nothing to save
-            print('Failed to save ROI: {}'.format(roiFileName))
+        if not self.semanticSaving:
+            # new way with roi list
+            rois2save=self.fetchShapes2ROIs()
+            if rois2save is None:
+                # nothing to save
+                print('Failed to save ROI: {}'.format(roiFileName))
+            else:
+                roiwrite(roiFileName,rois2save)
+                print('Saved ROI: {}'.format(roiFileName))
+
+            if self.stepping:
+                self.finishedSaving=True
+        # save a semantic annotation image
         else:
-            roiwrite(roiFileName,rois2save)
-            print('Saved ROI: {}'.format(roiFileName))
+            labelLayer=self.findLabelsLayerName(layerName='semantic')
+            if labelLayer is not None and len(labelLayer.data)>0:
+                try:
+                    import tifffile
+                    tifffile.imwrite(roiFileName,labelLayer.data.astype(bool),photometric='minisblack')
+                    print(f'Saved binary image: {roiFileName}')
+                except Exception as e:
+                    print(e)
+                    print(f'Failed to save binary image: {roiFileName}')
 
 
         print('finished saving')
@@ -2975,10 +3169,7 @@ class AnnotatorJ(QWidget):
 
             self.chckbxContourAssist.setEnabled(True)
             if self.classesFrame is not None:
-                try:
-                    self.viewer.window.remove_dock_widget(self.classesFrame)
-                except Exception as e:
-                    print(e)
+                self.classesFrame.closeClassesFrame()
 
             # restore default 'select' mouse click callback
             if mouse_bindings.select not in shapesLayer.mouse_drag_callbacks and self.customShapesLayerSelect in shapesLayer.mouse_drag_callbacks:
@@ -3010,7 +3201,12 @@ class AnnotatorJ(QWidget):
         if self.ColourSelector is None:
             self.ColourSelector=ColourSelector(self.viewer,annotatorjObj=self)
         else:
-            print('Colour widget already open')
+            # try to find 'x'-button closed version
+            if 'Colours' in self.viewer.window._dock_widgets.data:
+                print('Colour widget already open')
+            else:
+                # open it
+                self.ColourSelector=ColourSelector(self.viewer,annotatorjObj=self)
 
 
     def setOverlay(self):
@@ -3157,7 +3353,7 @@ class AnnotatorJ(QWidget):
                 self.finishedSelection=True
                 self.cancelledSaving=False
                 self.propsClassString.append(textVal)
-                #SaveNewProp("classes",textVal)
+                self.SaveNewProp('classes',textVal)
                 self.closeClassSelectionFrame()
 
         else:
@@ -3265,6 +3461,52 @@ class AnnotatorJ(QWidget):
 
         if update_thumbnail:
             layer._update_thumbnail()
+
+
+    def openOptionsFrame(self):
+        self.optionsFrame=OptionsFrame(self.viewer,self)
+
+
+    def findDockWidgets(self,newWidgetName):
+        wCount=0
+        widgets=[]
+        for w in self.viewer.window._dock_widgets.data:
+            # only care for the extra widgets apart from AnnotatorJ and AnnotatorJExport
+            if w=='napari-annotatorj: AnnotatorJ':
+                continue
+            elif w=='napari-annotatorj: AnnotatorJExport':
+                continue
+            else:
+                wCount+=1
+                widgets.append(w)
+
+        if newWidgetName in widgets: #and self.firstDockWidgetName==newWidgetName:
+            widgets.remove(newWidgetName)
+        else:
+            print(f'Cannot find widget {newWidgetName} in napari')
+            #debug:
+            print(widgets)
+        if len(widgets)>0:
+            newName=widgets[0]
+            self.firstDockWidgetName=newName
+            print(f'Resetting firstDockWidgetName to {newName}')
+            if newName=='Classes':
+                self.firstDockWidget=self.classesWidget
+            elif newName=='Options':
+                self.firstDockWidget=self.optionsWidget
+            elif newName=='Colours':
+                self.firstDockWidget=self.coloursWidget
+            elif newName=='Export' or newName=='napari-annotatorj: AnnotatorJExport':
+                # this should never happen
+                self.firstDockWidget=self.ExportWidget
+            else:
+                self.firstDockWidget=None
+                self.firstDockWidgetName=None
+                print('Resetting firstDockWidgetName to None')
+        else:
+            self.firstDockWidget=None
+            self.firstDockWidgetName=None
+            print('Resetting firstDockWidgetName to None')
             
 
 
@@ -3318,7 +3560,7 @@ class ClassesFrame(QWidget):
         if self.annotatorjObj.classesFrame is not None:
             # already inited once, load again
             print('detected that Classes widget has already been initialized')
-            if self.annotatorjObj.classesFrame.isVisible():
+            if self.annotatorjObj.classesFrame.isVisible() or 'Classes' in self.viewer.window._dock_widgets.data:
                 print('Classes widget is visible')
                 return
             else:
@@ -3512,7 +3754,28 @@ class ClassesFrame(QWidget):
         #self.classesFrame.show()
         self.setLayout(self.classMainVBox)
         #self.show()
-        self.viewer.window.add_dock_widget(self,name='Classes')
+        dw=self.viewer.window.add_dock_widget(self,name='Classes')
+        self.annotatorjObj.classesWidget=dw
+        if self.annotatorjObj.firstDockWidget is None:
+            self.annotatorjObj.firstDockWidget=dw
+            self.annotatorjObj.firstDockWidgetName='Classes'
+        else:
+            try:
+                self.viewer.window._qt_window.tabifyDockWidget(self.annotatorjObj.firstDockWidget,dw)
+            except Exception as e:
+                print(e)
+                # RuntimeError: wrapped C/C++ object of type QtViewerDockWidget has been deleted
+                # try to reset the firstDockWidget manually
+                self.annotatorjObj.findDockWidgets('Classes')
+                try:
+                    if self.annotatorjObj.firstDockWidget is None:
+                        self.annotatorjObj.firstDockWidget=dw
+                        self.annotatorjObj.firstDockWidgetName='Classes'
+                    else:
+                        self.viewer.window._qt_window.tabifyDockWidget(self.annotatorjObj.firstDockWidget,dw)
+                except Exception as e:
+                    print(e)
+                    print('Failed to add widget Classes')
 
 
     def addNewClass(self):
@@ -3922,6 +4185,30 @@ class ClassesFrame(QWidget):
 
         return curColour
 
+
+    def closeEvent(self, event):
+        event.ignore()
+        self.closeClassesFrame()
+        #event.accept()
+
+
+    def closeClassesFrame(self):
+        try:
+            if self.annotatorjObj.firstDockWidgetName=='Classes':
+                self.annotatorjObj.findDockWidgets('Classes')
+            self.viewer.window.remove_dock_widget(self.annotatorjObj.classesFrame)
+            self.annotatorjObj.classesWidget=None
+        except Exception as e:
+            print(e)
+            try:
+                if self.annotatorjObj.firstDockWidgetName=='Classes':
+                    self.annotatorjObj.findDockWidgets('Classes')
+                self.viewer.window.remove_dock_widget('Classes')
+                self.annotatorjObj.classesWidget=None
+            except Exception as e:
+                print(e)
+                print('Failed to remove widget named Classes')
+
 # -------------------------------------
 # end of class ClassesFrame
 # -------------------------------------
@@ -3939,7 +4226,7 @@ class ColourSelector(QWidget):
         if self.annotatorjObj is not None and self.annotatorjObj.ColourSelector is not None:
             # already inited once, load again
             print('detected that Colour widget has already been initialized')
-            if self.annotatorjObj.ColourSelector.isVisible():
+            if self.annotatorjObj.ColourSelector.isVisible() or 'Colours' in self.viewer.window._dock_widgets.data:
                 print('Colour widget is visible')
                 return
             else:
@@ -3989,7 +4276,28 @@ class ColourSelector(QWidget):
 
         self.setLayout(self.classMainVBox)
         #self.show()
-        self.viewer.window.add_dock_widget(self,name='Colours')
+        dw=self.viewer.window.add_dock_widget(self,name='Colours')
+        self.annotatorjObj.coloursWidget=dw
+        if self.annotatorjObj.firstDockWidget is None:
+            self.annotatorjObj.firstDockWidget=dw
+            self.annotatorjObj.firstDockWidgetName='Colours'
+        else:
+            try:
+                self.viewer.window._qt_window.tabifyDockWidget(self.annotatorjObj.firstDockWidget,dw)
+            except Exception as e:
+                print(e)
+                # RuntimeError: wrapped C/C++ object of type QtViewerDockWidget has been deleted
+                # try to reset the firstDockWidget manually
+                self.annotatorjObj.findDockWidgets('Colours')
+                try:
+                    if self.annotatorjObj.firstDockWidget is None:
+                        self.annotatorjObj.firstDockWidget=dw
+                        self.annotatorjObj.firstDockWidgetName='Colours'
+                    else:
+                        self.viewer.window._qt_window.tabifyDockWidget(self.annotatorjObj.firstDockWidget,dw)
+                except Exception as e:
+                    print(e)
+                    print('Failed to add widget Colours')
 
 
     def addColours(self,comboBox):
@@ -4067,11 +4375,20 @@ class ColourSelector(QWidget):
 
     def closeWidget(self):
         if self.annotatorjObj.ColourSelector is not None:
-                try:
-                    self.viewer.window.remove_dock_widget(self.annotatorjObj.ColourSelector)
-                    self.annotatorjObj.ColourSelector=None
-                except Exception as e:
-                    print(e)
+            try:
+                if self.annotatorjObj.firstDockWidgetName=='Colours':
+                    self.annotatorjObj.findDockWidgets('Colours')
+                self.viewer.window.remove_dock_widget(self.annotatorjObj.ColourSelector)
+                self.coloursWidget=None
+                self.annotatorjObj.ColourSelector=None
+            except Exception as e:
+                print(e)
+
+
+    def closeEvent(self, event):
+        event.ignore()
+        self.closeWidget()
+        #event.accept()
 
 
 # -------------------------------------
@@ -4091,7 +4408,7 @@ class ExportFrame(QWidget):
         if self.annotatorjObj is not None and self.annotatorjObj.ExportFrame is not None:
             # already inited once, load again
             print('detected that Export widget has already been initialized')
-            if self.annotatorjObj.ExportFrame.isVisible():
+            if self.annotatorjObj.ExportFrame.isVisible() or 'napari-annotatorj: AnnotatorJExport' in self.viewer.window._dock_widgets.data:
                 print('Export widget is visible')
                 return
             else:
@@ -4239,7 +4556,28 @@ class ExportFrame(QWidget):
         #self.show()
 
         if self.annotatorjObj is not None:
-            self.viewer.window.add_dock_widget(self,name='Export')
+            dw=self.viewer.window.add_dock_widget(self,name='Export')
+            if self.annotatorjObj.firstDockWidget is None:
+                self.annotatorjObj.firstDockWidget=dw
+                self.annotatorjObj.ExportWidget=dw
+                self.annotatorjObj.firstDockWidgetName='Export'
+            else:
+                try:
+                    self.viewer.window._qt_window.tabifyDockWidget(self.annotatorjObj.firstDockWidget,dw)
+                except Exception as e:
+                    print(e)
+                    # RuntimeError: wrapped C/C++ object of type QtViewerDockWidget has been deleted
+                    # try to reset the firstDockWidget manually
+                    self.annotatorjObj.findDockWidgets('Export')
+                    try:
+                        if self.annotatorjObj.firstDockWidget is None:
+                            self.annotatorjObj.firstDockWidget=dw
+                            self.annotatorjObj.firstDockWidgetName='Export'
+                        else:
+                            self.viewer.window._qt_window.tabifyDockWidget(self.annotatorjObj.firstDockWidget,dw)
+                    except Exception as e:
+                        print(e)
+                        print('Failed to add widget Export')
 
 
     def browseOrig(self):
@@ -5516,6 +5854,227 @@ class ExportFrame(QWidget):
 
 # -------------------------------------
 # end of class ExportFrame
+# -------------------------------------
+
+
+class OptionsFrame(QWidget):
+    def __init__(self,napari_viewer,annotatorjObj):
+        super().__init__()
+        self.viewer = napari_viewer
+        self.annotatorjObj=annotatorjObj
+
+        # check if there is opened instance of this frame
+        # the main plugin is: 'napari-annotatorj: Annotator J'
+        if self.annotatorjObj.optionsFrame is not None:
+            # already inited once, load again
+            print('detected that Options widget has already been initialized')
+            if self.annotatorjObj.optionsFrame.isVisible() or 'Options' in self.viewer.window._dock_widgets.data:
+                print('Options widget is visible')
+                return
+            else:
+                print('Options widget is not visible')
+                # rebuild the widget
+
+
+        self.titleLabel=QLabel('Configurations are saved and loaded on plugin startup. When applying changes requires the restart of napari, a message will be shown.')
+        self.titleLabel.setWordWrap(True)
+
+        self.annotTypeLabel=QLabel('annotation type: ')
+        self.annotTypeLabel.setToolTip('Select annotation type: instance for freehand drawing, bounding box ("bbox") for rectangles, semantic for painting with a brush (labels)')
+        self.annotTypeBox=QComboBox()
+        self.annotTypeBox.setToolTip('Select annotation type: instance for freehand drawing, bounding box ("bbox") for rectangles, semantic for painting with a brush (labels)')
+        validTypes=['instance','bbox','semantic']
+        for e in validTypes:
+            self.annotTypeBox.addItem(e)
+        #self.annotTypeBox.setCurrentIndex(0)
+        if self.annotatorjObj.selectedAnnotationType in validTypes:
+            # good to go
+            pass
+        else:
+            self.annotatorjObj.selectedAnnotationType='instance'
+            print('Setting annotation type to instance (default)')
+        self.annotTypeBox.setCurrentText(self.annotatorjObj.selectedAnnotationType)
+        self.annotTypeBox.currentIndexChanged.connect(self.annotTypeChanged)
+
+        self.optionsOkBtn=QPushButton('Ok')
+        self.optionsOkBtn.setToolTip('Apply changes')
+        self.optionsOkBtn.clicked.connect(self.applyOptions)
+        #self.optionsOkBtn.setStyleSheet(f"max-width: {int(self.annotatorjObj.bsize2)}px")
+        self.optionsCancelBtn=QPushButton('Cancel')
+        self.optionsCancelBtn.setToolTip('Revert changes')
+        self.optionsCancelBtn.clicked.connect(self.cancelOptions)
+        #self.optionsCancelBtn.setStyleSheet(f"max-width: {int(self.annotatorjObj.bsize2)}px")
+
+        self.optionsMainVbox=QVBoxLayout()
+        self.typeHBox=QHBoxLayout()
+        self.btnHBox=QHBoxLayout()
+        
+        self.typeHBox.addWidget(self.annotTypeLabel)
+        self.typeHBox.addWidget(self.annotTypeBox)
+        self.typeHBox.setAlignment(Qt.AlignLeft)
+
+        self.btnHBox.addWidget(self.optionsOkBtn)
+        self.btnHBox.addWidget(self.optionsCancelBtn)
+        #self.btnHBox.setAlignment(Qt.AlignRight)
+
+        self.optionsMainVbox.addWidget(self.titleLabel)
+        self.optionsMainVbox.addLayout(self.typeHBox)
+        self.optionsMainVbox.addLayout(self.btnHBox)
+
+        self.setLayout(self.optionsMainVbox)
+        #self.show()
+        dw=self.viewer.window.add_dock_widget(self,name='Options')
+        self.annotatorjObj.optionsWidget=dw
+        #dwOrig=self.annotatorjObj.findDockWidgets('Options')
+        if self.annotatorjObj.firstDockWidget is None:
+            self.annotatorjObj.firstDockWidget=dw
+            self.annotatorjObj.firstDockWidgetName='Options'
+        else:
+            try:
+                self.viewer.window._qt_window.tabifyDockWidget(self.annotatorjObj.firstDockWidget,dw)
+            except Exception as e:
+                print(e)
+                # RuntimeError: wrapped C/C++ object of type QtViewerDockWidget has been deleted
+                # try to reset the firstDockWidget manually
+                self.annotatorjObj.findDockWidgets('Options')
+                try:
+                    if self.annotatorjObj.firstDockWidget is None:
+                        self.annotatorjObj.firstDockWidget=dw
+                        self.annotatorjObj.firstDockWidgetName='Options'
+                    else:
+                        self.viewer.window._qt_window.tabifyDockWidget(self.annotatorjObj.firstDockWidget,dw)
+                except Exception as e:
+                    print(e)
+                    print('Failed to add widget Options')
+
+
+    def closeEvent(self,event):
+        event.ignore()
+        print('in the closeEvent event')
+        self.closeWidget()
+        #event.accept()
+
+
+    def annotTypeChanged(self,idx):
+        #self.annotatorjObj.selectedAnnotationType=self.annotTypeBox.currentText()
+        #print(f'Set annotation type: {self.annotatorjObj.selectedAnnotationType}')
+        print(f'Selected annotation type: {self.annotTypeBox.currentText()} (not set yet, please apply changes with "Ok" or revert with "Cancel")')
+
+
+    def applyOptions(self):
+        # apply all settings
+        self.setAnnotType()
+        # write all settings to file
+        self.annotatorjObj.writeParams2File()
+        self.closeWidget()
+
+
+    def setAnnotType(self):
+        newAnnotType=self.annotTypeBox.currentText()
+        newType=False
+        if self.annotatorjObj.selectedAnnotationType==newAnnotType:
+            # nothing changed
+            pass
+        else:
+            # new annot type selected, update the ROI layer and settings
+            newType=True
+            if self.annotatorjObj.selectedAnnotationType=='instance' or self.annotatorjObj.selectedAnnotationType=='bbox':
+                # shapes layer
+                roiLayer=self.annotatorjObj.findROIlayer()
+                if roiLayer is not None and len(roiLayer.data)>0:
+                    # need to save current annotations first
+                    # TODO
+                    self.annotatorjObj.saveData()
+                    # remove the layer
+                    self.viewer.layers.remove(roiLayer)
+                else:
+                    # can continue
+                    if self.annotatorjObj.selectedAnnotationType=='semantic':
+                        # remove the layer
+                        self.viewer.layers.remove(roiLayer)
+                    else:
+                        # maybe check type to avoid mismatched annot types in saved files
+                        # TODO
+                        warnings.warn(f'Set {newAnnotType} but current is {self.annotatorjObj.selectedAnnotationType}')
+                        pass
+            elif self.annotatorjObj.selectedAnnotationType=='semantic':
+                # labels layer
+                labelLayer=self.annotatorjObj.findLabelsLayerName(layerName='semantic')
+                if labelLayer is not None and len(labelLayer.data)>0:
+                    # need to save current annotations first
+                    # TODO
+                    self.annotatorjObj.saveData()
+                    self.viewer.layers.remove(labelLayer)
+                    pass
+                elif labelLayer is not None:
+                    # can continue
+                    self.viewer.layers.remove(labelLayer)
+                else:
+                    # can continue
+                    pass
+
+        self.annotatorjObj.selectedAnnotationType=newAnnotType
+        print(f'Set annotation type: {self.annotatorjObj.selectedAnnotationType}')
+
+        if newType:
+            if newAnnotType=='instance':
+                roiLayer=self.annotatorjObj.findROIlayer()
+                if roiLayer is None:
+                    self.annotatorjObj.initRoiManager()
+                roiLayer.mode='add_polygon'
+                if self.annotatorjObj.freeHandROI not in roiLayer.mouse_drag_callbacks:
+                    roiLayer.mouse_drag_callbacks.append(self.annotatorjObj.freeHandROI)
+            elif newAnnotType=='bbox':
+                roiLayer=self.annotatorjObj.findROIlayer()
+                if roiLayer is None:
+                    self.annotatorjObj.initRoiManager()
+                    roiLayer=self.annotatorjObj.findROIlayer()
+                roiLayer.mode='add_rectangle'
+                if self.annotatorjObj.freeHandROI in roiLayer.mouse_drag_callbacks:
+                    roiLayer.mouse_drag_callbacks.remove(self.annotatorjObj.freeHandROI)
+            elif newAnnotType=='semantic':
+                labelLayer=self.annotatorjObj.findLabelsLayerName(layerName='semantic')
+                if labelLayer is None:
+                    imageLayer=self.annotatorjObj.findImageLayer()
+                    if imageLayer is None:
+                        print('Will initialize semantic annotation layer upon image open function')
+                        return
+                    else:
+                        s=imageLayer.data.shape
+                        labelImage=numpy.zeros((s[0],s[1]),dtype='uint8')
+                        labelLayer=self.viewer.add_labels(labelImage,name='semantic')
+                labelLayer.mode='paint'
+                labelLayer.brush_size=self.annotatorjObj.brushSize
+                labelLayer.opacity=0.5
+
+
+    def cancelOptions(self):
+        print('Reverting all changes made in the Options widget')
+        self.closeWidget()
+
+
+    def closeWidget(self):
+        if self.annotatorjObj.optionsFrame is not None:
+            try:
+                if self.annotatorjObj.firstDockWidgetName=='Options':
+                    self.annotatorjObj.findDockWidgets('Options')
+                        
+                self.viewer.window.remove_dock_widget(self.annotatorjObj.optionsFrame)
+                self.annotatorjObj.optionsWidget=None
+                self.annotatorjObj.optionsFrame=None
+            except Exception as e:
+                print(e)
+                try:
+                    self.viewer.window.remove_dock_widget('Options')
+                    self.annotatorjObj.optionsFrame=None
+                    self.annotatorjObj.optionsWidget=None
+                except Exception as e:
+                    print(e)
+                    print('Failed to remove widget named Options')
+
+
+# -------------------------------------
+# end of class OptionsFrame
 # -------------------------------------
 
 
