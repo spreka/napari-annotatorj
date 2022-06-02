@@ -21,7 +21,7 @@ from napari.layers.shapes import _shapes_key_bindings as key_bindings
 from napari.layers.shapes import _shapes_mouse_bindings as mouse_bindings
 from napari.layers.labels import _labels_mouse_bindings as labels_mouse_bindings
 import warnings
-from cv2 import cv2
+import cv2
 from copy import deepcopy,copy
 #from napari.qt import create_worker #thread_worker
 from napari.qt.threading import thread_worker #create_worker
@@ -159,6 +159,7 @@ class AnnotatorJ(QWidget):
         self.saveAnnotTimes=False
 
         # read options from file if exists
+        self.params=None
         self.initParams()
 
         # for dock tabs
@@ -503,16 +504,163 @@ class AnnotatorJ(QWidget):
             self.buttonNext.setEnabled(True)
 
 
+        # fetch annotation type from settings
+        types=['instance','bbox','semantic']
+        validType=False
+        if self.rememberAnnotType and (self.selectedAnnotationType is not None and self.selectedAnnotationType!=""):
+            if self.selectedAnnotationType in types:
+                # valid annot type, can continue
+                validType=True
+                print(f'Fetched annotation type: {self.selectedAnnotationType}')
+
+        if not self.rememberAnnotType or not validType:
+            # use default instance
+            self.selectedAnnotationType='instance'
+
+        if self.rememberAnnotType:
+            # save it
+            self.SaveNewProp('selectedAnnotationType',self.selectedAnnotationType)
+
+        # instance annotation type
+        if self.selectedAnnotationType=='instance':
+            # set freehand selection tool by default
+            roiLayer=self.findROIlayer()
+            if roiLayer is None:
+                self.initRoiManager()
+                roiLayer=self.findROIlayer()
+            roiLayer.mode='add_polygon'
+            if self.freeHandROI not in roiLayer.mouse_drag_callbacks:
+                roiLayer.mouse_drag_callbacks.append(self.freeHandROI)
+            if not self.contAssist:
+                # contAssist is off
+                if not self.editMode:
+                    # edit mode is off
+                    if not self.classMode:
+                        # class mode is off
+                        # enable contour correction
+                        #self.chckbxAddAutomatically.setEnabled(True)
+                        #chckbxStepThroughContours.setEnabled(True)
+                        self.chckbxContourAssist.setEnabled(True)
+                    else:
+                        # class mode is on
+                        # disable the others
+                        #self.chckbxAddAutomatically.setChecked(False)
+                        #self.chckbxAddAutomatically.setEnabled(False)
+                        #self.chckbxStepThroughContours.setChecked(False)
+                        #self.chckbxStepThroughContours.setEnabled(False)
+                        self.chckbxContourAssist.setChecked(False)
+                        self.chckbxContourAssist.setEnabled(False)
+
+                        self.chckbxClass.setEnabled(True)
+
+                        self.editMode=False
+                        self.addAuto=False
+                        contAssist=False
+                    
+                else:
+                    # edit mode is on
+                    # disable contour correction
+                    #self.chckbxAddAutomatically.setChecked(False)
+                    #self.chckbxAddAutomatically.setEnabled(False)
+                    #self.chckbxStepThroughContours.setEnabled(True)
+                    self.chckbxContourAssist.setChecked(False)
+                    self.chckbxContourAssist.setEnabled(False)
+
+                    self.chckbxClass.setChecked(False)
+                    self.chckbxClass.setEnabled(False)
+
+                    self.addAuto=False
+                    self.classMode=False
+
+            else:
+                # contAssist is on
+                #self.chckbxAddAutomatically.setChecked(False)
+                #self.chckbxAddAutomatically.setEnabled(False)
+                #self.chckbxStepThroughContours.setChecked(False)
+                #self.chckbxStepThroughContours.setEnabled(False)
+                self.chckbxContourAssist.setEnabled(True)
+
+                self.chckbxClass.setChecked(False)
+                self.chckbxClass.setEnabled(False)
+
+                self.editMode=False
+                self.addAuto=False
+                self.classMode=False
+        
+        # semantic painting annotation type
+        elif self.selectedAnnotationType=='semantic':
+            # disable contour correction
+            self.addAuto=False
+            self.editMode=False
+            self.contAssist=False
+            self.classMode=False
+            #self.chckbxStepThroughContours.setChecked(False)
+            self.chckbxContourAssist.setChecked(False)
+            #self.chckbxAddAutomatically.setChecked(False)
+            #self.chckbxAddAutomatically.setEnabled(False)
+            self.chckbxContourAssist.setEnabled(False)
+            #self.chckbxStepThroughContours.setEnabled(False)
+            self.chckbxClass.setChecked(False)
+            self.chckbxClass.setEnabled(False)
+
+            # remove default ROI layer if present
+            roiLayer=self.findROIlayer()
+            if roiLayer is not None:
+                self.viewer.layers.remove(roiLayer)
+            # add labels layer for painting
+            labelLayer=self.findLabelsLayerName(layerName='semantic')
+            if labelLayer is None:
+                imageLayer=self.findImageLayer()
+                if imageLayer is None:
+                    # this should never happen
+                    print('No image opened yet')
+                    return
+                else:
+                    s=imageLayer.data.shape
+                    labelImage=numpy.zeros((s[0],s[1]),dtype='uint8')
+                    labelLayer=self.viewer.add_labels(labelImage,name='semantic')
+            labelLayer.mode='paint'
+            labelLayer.brush_size=self.brushSize
+            labelLayer.opacity=0.5
+
+
+        # bounding box annotation
+        elif self.selectedAnnotationType=='bbox':
+            # set rectangle selection tool by default
+            roiLayer=self.findROIlayer()
+            if roiLayer is None:
+                self.initRoiManager()
+                roiLayer=self.findROIlayer()
+            roiLayer.mode='add_rectangle'
+            if self.freeHandROI in roiLayer.mouse_drag_callbacks:
+                roiLayer.mouse_drag_callbacks.remove(self.freeHandROI)
+
+            # disable contour correction
+            self.editMode=False
+            self.contAssist=False
+            #self.chckbxAddAutomatically.setEnabled(True)
+            #self.chckbxStepThroughContours.setChecked(False)
+            self.chckbxContourAssist.setChecked(False)
+            #self.chckbxStepThroughContours.setEnabled(False)
+            self.chckbxContourAssist.setEnabled(False)
+            self.chckbxClass.setEnabled(True)
+
+
         # TODO: add missing settings
 
 
         # reset contour assist layer
+        self.inAssisting=False
         if self.contAssist:
             self.setContourAssist(Qt.Checked)
-        else:
+        elif not self.contAssist and self.selectedAnnotationType!='semantic':
             self.setContourAssist(False)
 
         self.overlayAdded=False
+
+        self.startedEditing=False
+        self.origEditedROI=None
+        self.closeingOnPurpuse=False
 
         # when open function finishes:
         self.started=True
@@ -6021,6 +6169,7 @@ class OptionsFrame(QWidget):
                 roiLayer=self.annotatorjObj.findROIlayer()
                 if roiLayer is None:
                     self.annotatorjObj.initRoiManager()
+                    roiLayer=self.annotatorjObj.findROIlayer()
                 roiLayer.mode='add_polygon'
                 if self.annotatorjObj.freeHandROI not in roiLayer.mouse_drag_callbacks:
                     roiLayer.mouse_drag_callbacks.append(self.annotatorjObj.freeHandROI)

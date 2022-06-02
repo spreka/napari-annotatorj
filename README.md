@@ -25,6 +25,8 @@ https://napari.org/docs/plugins/index.html
 
 ## Installation
 
+Installation is possible with [pip](#pip), [napari](#bundled-napari-app) or [scripts](#script).
+### Pip
 You can install `napari-annotatorj` via [pip]:
 
     pip install napari[all]
@@ -41,7 +43,38 @@ On Linux distributions, the following error may arise upon napari startup after 
 
 	sudo apt install libxcb-xinerama0
 
+### Bundled napari app
 The bundled application version of [napari](https://github.com/napari/napari/releases) allows the pip install of plugins in the .zip distribution. After installation of this release, napari-annotatorj can be installed from the `Plugins --> Install/Uninstall plugins...` menu by searching for its name and clicking on the `Install` button next to it.
+
+### Script
+Single-file install is supported on [**Windows**](#windows) and [Linux](#linux) (currently). It will create a virtual environment named `napariAnnotatorjEnv` in the parent folder of the cloned repository, install the package via pip and start napari. It requires a valid Python install.
+
+#### Windows
+To start it, run in the Command prompt
+
+	git clone https://github.com/spreka/napari-annotatorj.git
+	cd napari-annotatorj
+	install.bat
+
+Or download [install.bat](https://github.com/spreka/napari-annotatorj/blob/main/install.bat) and run it from the Command prompt.
+
+After install, you can use [startup_napari.bat](https://github.com/spreka/napari-annotatorj/blob/main/startup_napari.bat) to activate your installed virtual environment and run napari. Run it from the Command prompt with:
+
+	startup_napari.bat
+
+
+#### Linux
+To start it, run in the Terminal
+
+	git clone https://github.com/spreka/napari-annotatorj.git
+	cd napari-annotatorj
+	install.sh
+
+Or download [install.sh](https://github.com/spreka/napari-annotatorj/blob/main/install.sh) and run it from the Terminal.
+
+After install, you can use [startup_napari.sh](https://github.com/spreka/napari-annotatorj/blob/main/startup_napari.sh) to activate your installed virtual environment and run napari. Run it from the Terminal with:
+
+	startup_napari.sh
 
 ***
 ## Intro
