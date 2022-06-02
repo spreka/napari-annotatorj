@@ -2702,7 +2702,7 @@ class AnnotatorJ(QWidget):
             else:
                 self.curOrigImage=None
             if self.curOrigImage is None:
-                warnings.warn("Error","Cannot find image")
+                warnings.warn('Cannot find image')
                 return None
 
             print('  >> input image prepared...')
