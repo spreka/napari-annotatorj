@@ -68,7 +68,7 @@ class AnnotatorJ(QWidget):
         self.startedEditing=False
         self.editROIidx=-1
         self.origEditedROI=None
-        self.brushSize=5
+        #self.brushSize=5
         self.imgSize=None
 
         # logo files: annotatorj_logo_dark, annotatorj_logo_light, annotatorj_logo_red
@@ -121,7 +121,7 @@ class AnnotatorJ(QWidget):
         # threshold of distance in pixels from the existing contour in assisting region growing
         self.distanceThreshVal=17
         # brush sizes
-        self.correctionBrushSize=10
+        self.correctionBrushSize=5
         self.semanticBrushSize=50
 
         self.defColour='white'
@@ -444,26 +444,30 @@ class AnnotatorJ(QWidget):
         # check if a shapes layer already exists for the rois
         # if so, bring it forward
         roiLayer=self.findROIlayer(True)
-        if roiLayer is None:
-            # set roi edge width for visibility
-            s=imageLayer.data.shape
-            if (s[0]<=300) and (s[1]<=300):
-                self.annotEdgeWidth=0.5
-            elif (s[0]>300 and s[0]<=500) or (s[1]>300 and s[1]<=500):
-                self.annotEdgeWidth=1.0
-            elif (s[0]>500 and s[0]<=1000) or (s[1]>500 and s[1]<=1000):
-                self.annotEdgeWidth=1.5
-            elif (s[0]>1000 and s[0]<=1500) or (s[1]>1000 and s[1]<=1500):
-                self.annotEdgeWidth=2.0
-            elif (s[0]>1500 and s[0]<=2000) or (s[1]>1500 and s[1]<=2000):
-                self.annotEdgeWidth=3.0
-            elif (s[0]>2000 and s[0]<=3000) or (s[1]>2000 and s[1]<=3000):
-                self.annotEdgeWidth=5.0
-            else:
-                self.annotEdgeWidth=7.0
 
+        # set roi edge width for visibility
+        s=imageLayer.data.shape
+        if (s[0]<=300) and (s[1]<=300):
+            self.annotEdgeWidth=0.5
+        elif (s[0]>300 and s[0]<=500) or (s[1]>300 and s[1]<=500):
+            self.annotEdgeWidth=1.0
+        elif (s[0]>500 and s[0]<=1000) or (s[1]>500 and s[1]<=1000):
+            self.annotEdgeWidth=1.5
+        elif (s[0]>1000 and s[0]<=1500) or (s[1]>1000 and s[1]<=1500):
+            self.annotEdgeWidth=2.0
+        elif (s[0]>1500 and s[0]<=2000) or (s[1]>1500 and s[1]<=2000):
+            self.annotEdgeWidth=3.0
+        elif (s[0]>2000 and s[0]<=3000) or (s[1]>2000 and s[1]<=3000):
+            self.annotEdgeWidth=5.0
+        else:
+            self.annotEdgeWidth=7.0
+
+        if roiLayer is None:
             # create new ROI layer if none present
             self.initRoiManager()
+        else:
+            roiLayer.current_edge_width=self.annotEdgeWidth
+
         self.viewer.reset_view()
 
         self.curFileList=[f for f in os.listdir(self.defDir) if os.path.isfile(os.path.join(self.defDir,f)) and os.path.splitext(f)[1] in self.imageExsts]
@@ -609,19 +613,24 @@ class AnnotatorJ(QWidget):
                 self.viewer.layers.remove(roiLayer)
             # add labels layer for painting
             labelLayer=self.findLabelsLayerName(layerName='semantic')
-            if labelLayer is None:
-                imageLayer=self.findImageLayer()
-                if imageLayer is None:
-                    # this should never happen
-                    print('No image opened yet')
-                    return
-                else:
-                    s=imageLayer.data.shape
-                    labelImage=numpy.zeros((s[0],s[1]),dtype='uint8')
-                    labelLayer=self.viewer.add_labels(labelImage,name='semantic')
+            if labelLayer is not None:
+                self.viewer.layers.remove(labelLayer)
+
+            imageLayer=self.findImageLayer()
+            if imageLayer is None:
+                # this should never happen
+                print('No image opened yet')
+                return
+            else:
+                s=imageLayer.data.shape
+                labelImage=numpy.zeros((s[0],s[1]),dtype='uint8')
+                labelLayer=self.viewer.add_labels(labelImage,name='semantic')
             labelLayer.mode='paint'
-            labelLayer.brush_size=self.brushSize
+            labelLayer.brush_size=self.correctionBrushSize
             labelLayer.opacity=0.5
+
+            # resize the viewer to the new image size
+            self.viewer.reset_view()
 
 
         # bounding box annotation
@@ -1713,7 +1722,7 @@ class AnnotatorJ(QWidget):
                 # set the tool for an editing-capable one
                 #roiLayer.mode='add_polygon';
                 labelLayer.mode='paint'
-                labelLayer.brush_size=self.brushSize
+                labelLayer.brush_size=self.correctionBrushSize
                 labelLayer.opacity=0.5
 
                 # add a modifier to the paint tool to erase when 'alt' is held
@@ -1810,7 +1819,7 @@ class AnnotatorJ(QWidget):
             print('Saved edited ROI')
 
             # store updated brush size
-            self.brushSize=labelLayer.brush_size
+            self.correctionBrushSize=labelLayer.brush_size
 
             # clear everything
             self.cleanUpAfterEdit(labelLayer,roiLayer)
@@ -1843,7 +1852,7 @@ class AnnotatorJ(QWidget):
             print('Restored edited ROI to its original')
 
         # store updated brush size
-        self.brushSize=labelLayer.brush_size
+        self.correctionBrushSize=labelLayer.brush_size
 
         # clear everything
         self.cleanUpAfterEdit(labelLayer,roiLayer)
@@ -1865,7 +1874,7 @@ class AnnotatorJ(QWidget):
         print('Restored edited ROI to its original')
 
         # store updated brush size
-        self.brushSize=labelLayer.brush_size
+        self.correctionBrushSize=labelLayer.brush_size
 
         # clear everything
         self.cleanUpAfterEdit(labelLayer,roiLayer)
@@ -1938,7 +1947,7 @@ class AnnotatorJ(QWidget):
             print('Restored edited ROI to its original')
 
         # store updated brush size
-        self.brushSize=labelLayer.brush_size
+        self.correctionBrushSize=labelLayer.brush_size
 
         # clear everything
         self.cleanUpAfterEdit(labelLayer,roiLayer)
@@ -1989,7 +1998,7 @@ class AnnotatorJ(QWidget):
             print('Added ROI ('+str(len(roiLayer.data))+'.) - assist mode')
 
             # store updated brush size
-            self.brushSize=labelLayer.brush_size
+            self.correctionBrushSize=labelLayer.brush_size
 
             # clear everything
             self.cleanUpAfterContAssist(labelLayer,roiLayer)
@@ -2012,7 +2021,7 @@ class AnnotatorJ(QWidget):
         roiLayer=self.findROIlayer()
 
         # store updated brush size
-        self.brushSize=labelLayer.brush_size
+        self.correctionBrushSize=labelLayer.brush_size
 
         # clear everything
         self.cleanUpAfterContAssist(labelLayer,roiLayer)
@@ -2170,7 +2179,7 @@ class AnnotatorJ(QWidget):
                 # set the tool for an editing-capable one
                 #roiLayer.mode='add_polygon';
                 labelLayer.mode='paint'
-                labelLayer.brush_size=self.brushSize
+                labelLayer.brush_size=self.correctionBrushSize
                 labelLayer.opacity=0.5
 
                 # TODO: add callbacks like in editmode
@@ -2387,6 +2396,22 @@ class AnnotatorJ(QWidget):
                     if overlayLayer is not None:
                         # delete it
                         self.viewer.layers.remove(overlayLayer)
+
+                    # close semantic layer if any
+                    semanticLayer=self.findLabelsLayerName(layerName='semantic')
+                    if semanticLayer is not None:
+                        # delete it
+                        self.viewer.layers.remove(semanticLayer)
+
+            # close previous roi layers if any
+            layers2del=[]
+            for x in self.viewer.layers:
+                if (x.__class__ is Shapes):
+                    # mark it for deletion
+                    print(f'deleting shapes layer {x.name}')
+                    layers2del.append(x.name)
+            for x in layers2del:
+                self.viewer.layers.remove(x)
 
 
             # check if image was passed as input argument
@@ -6193,7 +6218,7 @@ class OptionsFrame(QWidget):
                         labelImage=numpy.zeros((s[0],s[1]),dtype='uint8')
                         labelLayer=self.viewer.add_labels(labelImage,name='semantic')
                 labelLayer.mode='paint'
-                labelLayer.brush_size=self.annotatorjObj.brushSize
+                labelLayer.brush_size=self.annotatorjObj.semanticBrushSize
                 labelLayer.opacity=0.5
 
 
