@@ -4957,7 +4957,7 @@ class ExportFrame(QWidget):
 
 
     def setAnnotRoi(self,state):
-        if state==Qt.Checked:
+        if state==True:
             # ROI object type selected, default
             # set var for object
             self.selectedObjectType='ROI'
@@ -4970,14 +4970,19 @@ class ExportFrame(QWidget):
             self.chckbxCoordinates.setEnabled(True)
             self.chckbxOverlay.setEnabled(True)
 
-            self.initializeOrigFolderOpening(self.textFieldOrig.text())
-            self.initializeROIFolderOpening(self.textFieldROI.text())
+            # set default export option
+            self.chckbxMultiLabel.setChecked(True)
+
+            if self.textFieldOrig.text()!='':
+                self.initializeOrigFolderOpening(self.textFieldOrig.text())
+            if self.textFieldROI.text()!='':   
+                self.initializeROIFolderOpening(self.textFieldROI.text())
         else:
             # handle in next button's selected option
             pass
 
     def setAnnotSemantic(self,state):
-        if state==Qt.Checked:
+        if state==True:
             # semantic selected, set everything to semantic instead
             # set var for object
             self.selectedObjectType="semantic"
@@ -4990,16 +4995,21 @@ class ExportFrame(QWidget):
             self.chckbxCoordinates.setEnabled(True)
             self.chckbxOverlay.setEnabled(True)
 
-            self.initializeOrigFolderOpening(self.textFieldOrig.text())
-            self.initializeROIFolderOpening(self.textFieldROI.text())
+            # set default export option
+            self.chckbxSemantic.setChecked(True)
+
+            if self.textFieldOrig.text()!='':
+                self.initializeOrigFolderOpening(self.textFieldOrig.text())
+            if self.textFieldROI.text()!='':   
+                self.initializeROIFolderOpening(self.textFieldROI.text())
 
             warnings.warn('Semantic annotation type selected.\nExported images (instance, stack) might\ncontain multiple touching objects as one!')
         else:
             # handle in next button's selected option
             pass
 
-    def setAnnotBbox(self):
-        if state==Qt.Checked:
+    def setAnnotBbox(self,state):
+        if state==True:
             # bbox selected, set everything to bbox instead
             # set var for object
             self.selectedObjectType="bbox"
@@ -5016,8 +5026,13 @@ class ExportFrame(QWidget):
             self.chckbxMultiLayer.setChecked(False)
             self.chckbxSemantic.setChecked(False)
 
-            self.initializeOrigFolderOpening(self.textFieldOrig.text())
-            self.initializeROIFolderOpening(self.textFieldROI.text())
+            # set default export option
+            self.chckbxCoordinates.setChecked(True)
+
+            if self.textFieldOrig.text()!='':
+                self.initializeOrigFolderOpening(self.textFieldOrig.text())
+            if self.textFieldROI.text()!='':   
+                self.initializeROIFolderOpening(self.textFieldROI.text())
         else:
             # handle in next button's selected option
             pass
@@ -5812,6 +5827,11 @@ class ExportFrame(QWidget):
 
         bboxList=[]
 
+        # width and height are reversed, swap them here:
+        tmp=width
+        width=height
+        height=tmp
+        
         # start getting the objects from the annotation file
         for r in range(roiCount):
             c=shapeLayer.properties['class'][r]
@@ -5851,7 +5871,7 @@ class ExportFrame(QWidget):
         with open(outPath,'w',newline='') as csvFile:
             csvWriter = csv.writer(csvFile, delimiter=' ')
             # write header
-            csvWriter.writerow(['class','x','y','width','height'])
+            #csvWriter.writerow(['class','x','y','width','height'])
             for row in bboxes:
                 csvWriter.writerow(row)
 
@@ -5860,6 +5880,12 @@ class ExportFrame(QWidget):
         # count the number of objects in the current class first --> create the bboxList of this size
         thisClassCount=0
         lineNum=0
+
+        # width and height are reversed, swap them here:
+        tmp=imWidth
+        imWidth=imHeight
+        imHeight=tmp
+
         # prepare a bbox array for export
         bboxList=[]
         for r in range(roiCount):
