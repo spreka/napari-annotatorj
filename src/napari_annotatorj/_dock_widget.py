@@ -11,7 +11,7 @@ from magicgui import magic_factory
 
 import os
 import skimage.io
-from roifile import ImagejRoi,ROI_TYPE,roiwrite
+from roifile import ImagejRoi,ROI_TYPE,roiwrite,ROI_OPTIONS
 from napari.layers import Shapes, Image, Labels
 import numpy
 from qtpy.QtCore import Qt,QSize,QRect
@@ -894,6 +894,12 @@ class AnnotatorJ(QWidget):
                 newRoi.roitype=ROI_TYPE.FREEHAND
             elif t=='rectangle':
                 newRoi.roitype=ROI_TYPE.RECT
+                # set params manually to make it imagej-compatible
+                newRoi.options=ROI_OPTIONS(0)
+                newRoi.subpixel_coordinates=None
+                newRoi.integer_coordinates=None
+                newRoi.n_coordinates=0
+
             newRoi.name=roiLayer.properties['name'][i]
             newRoi.group=roiLayer.properties['class'][i]
 
