@@ -1550,6 +1550,7 @@ class AnnotatorJ(QWidget):
             shapesLayer.events.data.connect(self.updateNewROIprops,position='last')
             shapesLayer.mouse_drag_callbacks.append(self.freeHandROI)
             shapesLayer.mouse_drag_callbacks.append(self.editROI)
+            shapesLayer.mouse_drag_callbacks.append(self.limitBBox2ImageSize)
         else:
             return
         return
@@ -2044,7 +2045,8 @@ class AnnotatorJ(QWidget):
         self.origEditedROI=None
 
         # delete this label layer
-        self.viewer.layers.remove(labelLayer)
+        if labelLayer is not None:
+            self.viewer.layers.remove(labelLayer)
 
         if roiLayer.selected_data:
             roiLayer.selected_data.pop()
@@ -2160,8 +2162,11 @@ class AnnotatorJ(QWidget):
             
             if newROI is None:
                 # failed, return
-                print('Failed suggesting a better contour')
+                warnings.warn('Failed suggesting a better contour')
                 self.invertedROI=None
+
+                # clean up
+                self.cleanUpAfterContAssist(None,roiLayer)
             else:
                 # display this contour
                 roiLayer.add_polygons(newROI)
@@ -2260,6 +2265,45 @@ class AnnotatorJ(QWidget):
         roiLayer=self.findROIlayer()
         initProps={'name': array(['0001'], dtype='<U4'),'class': array([0]),'nameInt': array([1])}
         roiLayer.text.add(initProps,1)
+
+
+    def limitBBox2ImageSize(self,layer,event):
+        yield
+        
+        if layer.mode=='add_rectangle' and self.selectedAnnotationType=='bbox':
+            # limit drawn bbox to image size
+            dragged=False
+            # on move
+            while event.type == 'mouse_move':
+                dragged = True
+                yield
+            # on release
+            if dragged:
+                # drag ended
+                imageLayer=self.findImageLayer()
+                if imageLayer is not None:
+                    s=imageLayer.data.shape
+                    self.imgSize=s
+
+                    n=len(layer.data)-1
+                    curData=layer.data[n]
+                    curData[0,0]=min(max(curData[0,0],0),s[0])
+                    curData[0,1]=min(max(curData[0,1],0),s[1])
+                    curData[1,0]=min(max(curData[1,0],0),s[0])
+                    curData[1,1]=min(max(curData[1,1],0),s[1])
+                    curData[2,0]=min(max(curData[2,0],0),s[0])
+                    curData[2,1]=min(max(curData[2,1],0),s[1])
+                    curData[3,0]=min(max(curData[3,0],0),s[0])
+                    curData[3,1]=min(max(curData[3,1],0),s[1])
+
+                    layer.selected_data={n}
+                    layer.remove_selected()
+                    layer.add_rectangles(curData)
+                    layer.refresh()
+                else:
+                    return
+        else:
+            return
 
 
     def quickExport(self):
@@ -2908,6 +2952,9 @@ class AnnotatorJ(QWidget):
             print('curBbox: ')
             print(curBbox)
 
+            if w<=1 or h<=1:
+                return None
+
             # check if the corner points are included
             cornerCount=0
             if [0.0,0.0] in assistedROI:
@@ -2986,6 +3033,7 @@ class AnnotatorJ(QWidget):
             self.invertedROI=None
             
             print('  null ROI on line #3909')
+            return None
             
         else:
             assistedBbox=[]
