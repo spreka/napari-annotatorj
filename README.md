@@ -149,7 +149,8 @@ Assisted annotation via a pre-trained deep learning model's suggested contour.
 2. the suggested contour is displayed automatically
 3. modify the contour:
     - edit with mouse drag or 
-    - erase holding "Alt"
+    - erase holding "Alt" or
+	- invert with pressing "u"
 4. finalize it
     - accept with pressing "q" or
     - reject with pressing "Ctrl" + "Del"

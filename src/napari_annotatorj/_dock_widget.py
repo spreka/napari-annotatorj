@@ -10,7 +10,7 @@ from qtpy.QtWidgets import QWidget, QHBoxLayout,QVBoxLayout, QPushButton, QCheck
 from magicgui import magic_factory
 
 import os
-import skimage.io
+import skimage.io, skimage.util
 from roifile import ImagejRoi,ROI_TYPE,roiwrite,ROI_OPTIONS
 from napari.layers import Shapes, Image, Labels
 import numpy
@@ -120,6 +120,12 @@ class AnnotatorJ(QWidget):
         self.intensityThreshValB=0.2
         # threshold of distance in pixels from the existing contour in assisting region growing
         self.distanceThreshVal=17
+        self.contAssistCropMask=None
+        self.contAssistCopMaskMasked=None
+        self.contAssistCropMaskT=None
+        self.contAssistCropMaskBbox=None
+        self.assistedROI=None
+        self.invertedROIFlipped=False
         # brush sizes
         self.correctionBrushSize=5
         self.semanticBrushSize=50
@@ -2034,6 +2040,111 @@ class AnnotatorJ(QWidget):
         self.cleanUpAfterContAssist(labelLayer,roiLayer)
 
 
+    def invertContAssist(self,labelLayer):
+        # invert current suggestion
+        if not self.inAssisting:
+            print('Cannot invert suggested contour when not \'inAssisting\'')
+            return
+        yield
+
+        print('U pressed - inverting suggested contour')
+
+        if self.invertedROI is not None:
+            print('using stored invertedROI')
+            newROI=numpy.squeeze(deepcopy(self.invertedROI))
+
+            # remember the coords were flipped here
+            #self.invertedROIFlipped=not self.invertedROIFlipped
+            if self.invertedROIFlipped==False:
+                self.invertedROIFlipped=True
+
+            # swap with assistedROI
+            self.invertedROI=deepcopy(self.assistedROI)
+            self.assistedROI=deepcopy(newROI)
+
+
+        #elif self.contAssistCropMask is not None and self.contAssistCopMaskMasked is not None and self.contAssistCropMaskT is not None and self.contAssistCropMaskBbox is not None:
+        elif self.contAssistCopMaskMasked is not None and self.contAssistCropMaskBbox is not None:
+            # invert the mask
+            print('inverting the mask')
+            #self.contAssistCopMaskMasked=self.contAssistCropMask<=self.contAssistCropMaskT
+            self.contAssistCopMaskMasked=skimage.util.invert(self.contAssistCopMaskMasked)
+
+            newROI=self.contourFromPed(self.contAssistCopMaskMasked,None,self.contAssistCropMaskBbox,deepcopy(self.curPredictionImage))
+
+            maxTries=3
+            tri=0
+            while tri<maxTries:
+                if numpy.array_equal(newROI,self.assistedROI):
+                    print(f'Failed to invert the ROI, trying again ({tri+1})')
+                    self.contAssistCopMaskMasked=skimage.util.invert(self.contAssistCopMaskMasked)
+                    
+                    newROI=self.contourFromPed(self.contAssistCopMaskMasked,None,self.contAssistCropMaskBbox,deepcopy(self.curPredictionImage))
+                    tri+=1
+            if tri==2:
+                print('Failed to invert the ROI')
+                #return
+
+        else:
+            print('cannot invert ROI')
+            newROI=None
+
+        roiLayer=self.findROIlayer(layerName='contourAssist')
+        if roiLayer is None:
+            print('No ROI layer found for contour assist (contourAssist)')
+            roiLayer=Shapes(name='contourAssist',shape_type='polygon',edge_width=2,edge_color=self.defColour,face_color=[0,0,0,0])
+            self.viewer.add_layer(roiLayer)
+        else:
+            while len(roiLayer.data)>0:
+                roiLayer._data_view.remove(0)
+
+        if newROI is None:
+            # failed, return
+            warnings.warn('Failed suggesting a better contour')
+            self.invertedROI=None
+
+            # clean up
+            self.cleanUpAfterContAssist(None,roiLayer)
+        else:
+            # display this contour
+            roiLayer.add_polygons(newROI)
+
+            # succeeded, nothing else to do
+            print('Showing suggested contour')
+
+            # user can check it visually -->
+                    # set brush selection tool for contour modification -->
+
+            labels = roiLayer.to_labels([self.imgSize[0], self.imgSize[1]])
+            # delete this temp shape layer
+            self.viewer.layers.remove(roiLayer)
+            # convert to labels layer
+            labelLayer=self.findLabelsLayerName(layerName='editing')
+            if labelLayer is not None:
+                labelLayer.data=labels
+            else:
+                labelLayer = self.viewer.add_labels(labels, name='editing')
+
+                # set the tool for an editing-capable one
+                #roiLayer.mode='add_polygon';
+                labelLayer.mode='paint'
+                labelLayer.brush_size=self.correctionBrushSize
+                labelLayer.opacity=0.5
+
+                # TODO: add callbacks like in editmode
+                # add a modifier to the paint tool to erase when 'alt' is held
+                labelLayer.mouse_drag_callbacks.insert(0,self.eraseBrush2)
+
+                # bind the shortcut 'q' to acceptEdit function
+                # 'ctrl+q' is by default bound to exit, so no ctrl here
+                labelLayer.bind_key('q',func=self.acceptContAssist)
+                labelLayer.bind_key('Control-Delete',func=self.deleteContAssist)
+                labelLayer.bind_key('u',func=self.invertContAssist)
+
+            #self.viewer.layers.selection.clear()
+            self.viewer.layers.selection.add(labelLayer)
+
+
     def cleanUpAfterContAssist(self,labelLayer,roiLayer):
         # reset vars
         self.inAssisting=False
@@ -2043,6 +2154,12 @@ class AnnotatorJ(QWidget):
         self.acObjects=None
         self.startedEditing=False
         self.origEditedROI=None
+
+        self.contAssistCropMask=None
+        self.contAssistCopMaskMasked=None
+        self.contAssistCropMaskT=None
+        self.contAssistCropMaskBbox=None
+        self.invertedROIFlipped=False
 
         # delete this label layer
         if labelLayer is not None:
@@ -2201,6 +2318,7 @@ class AnnotatorJ(QWidget):
                 # 'ctrl+q' is by default bound to exit, so no ctrl here
                 labelLayer.bind_key('q',func=self.acceptContAssist)
                 labelLayer.bind_key('Control-Delete',func=self.deleteContAssist)
+                labelLayer.bind_key('u',func=self.invertContAssist)
                 
 
                 # detect pressing "q" when they add the new contour -->
@@ -2834,8 +2952,17 @@ class AnnotatorJ(QWidget):
         t=skimage.filters.threshold_otsu(cropMask)
         masked=cropMask>t
 
+        # save vars for inverting
+        self.contAssistCropMask=deepcopy(cropMask)
+        self.contAssistCopMaskMasked=deepcopy(masked)
+        self.contAssistCropMaskT=copy(t)
+        self.contAssistCropMaskBbox=deepcopy(tmpBbox)
+
         # see if the mask needs to be inverted:
-        if self.checkIJMatrixCorners(maskImage.data):
+        #if self.checkIJMatrixCorners(maskImage.data):
+        need2invert=self.checkIJMatrixCorners(cropMask)
+        #need2invert=False
+        if need2invert:
             # need to invert it
             print('  >> need to invert mask: true')
             masked=cropMask<=t
@@ -2845,6 +2972,13 @@ class AnnotatorJ(QWidget):
         # -------- active contour method starts here ------------
         # moved to its own fcn
 
+        # moved contour creation to its own fcn contourFromPred
+        assistedROI=self.contourFromPed(masked,assistedROI,tmpBbox,maskImage.data)
+
+        return assistedROI
+
+
+    def contourFromPed(self,masked,assistedROI,tmpBbox,maskImageData):
         # after everything is done: the new binary image must be converted to selection (Roi) and displayed on the image
         # create selection command, ThresholdToSelection class
         intermediateRoi,hierarchy=cv2.findContours(masked.astype(numpy.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
@@ -2866,12 +3000,15 @@ class AnnotatorJ(QWidget):
             print('Failed to create new contour with active contours, showing U-Net prediction')
             imp=None # placeholder
             assistedROI=deepcopy(intermediateRoi)
-            assistedROI=self.postProcessAssistedROI(assistedROI,tmpBbox,maskImage.data,True,imp,True)
+            assistedROI=self.postProcessAssistedROI(assistedROI,tmpBbox,maskImageData,True,imp,True)
+            self.assistedROI=deepcopy(assistedROI)
             # also reset the inverted roi
             if numpy.array_equal(assistedROI,self.invertedROI):
                 print('Failed to invert current roi (same)')
             if self.invertedROI is None:
                 print('  null ROI on line #3822')
+            elif len(numpy.squeeze(self.invertedROI))>1:
+                self.invertedROI=numpy.array(numpy.fliplr(numpy.squeeze(self.invertedROI+[self.ROIpositionX,self.ROIpositionY])))
 
         
         # roi positioning was done here, moved to its own fcn
@@ -2882,10 +3019,6 @@ class AnnotatorJ(QWidget):
         # set main imwindow var to the original image
 
         return assistedROI
-
-
-        #return initROI
-        #return tmpROI
 
 
 
@@ -2931,11 +3064,11 @@ class AnnotatorJ(QWidget):
         return need2invert
 
 
-    def validateROI(self,assistedROI,maskImage):
+    def validateROI(self,assistedROI,maskImage,tmpBbox):
 
         if assistedROI is not None and len(assistedROI)>1:
             # select the largest found object and delete all others
-            assistedROI=self.selectLargestROI(assistedROI)
+            assistedROI=self.selectLargestROI(assistedROI,box=tmpBbox)
 
         # check if we have a valid roi now, else return null
         if assistedROI is not None:
@@ -2957,22 +3090,22 @@ class AnnotatorJ(QWidget):
 
             # check if the corner points are included
             cornerCount=0
-            if [0.0,0.0] in assistedROI:
+            if ((assistedROI==numpy.array([0.0,0.0])).all(axis=(1,2))).any():
                 # top left corner
                 cornerCount+=1
                 print('     (0,0) corner')
             
-            if [0.0,curBbox[2]] in assistedROI:
+            if ((assistedROI==numpy.array([0.0,curBbox[2]])).all(axis=(1,2))).any():
                 # ? top right corner
                 cornerCount+=1
                 print('     (0,+) corner')
             
-            if [curBbox[3],0.0] in assistedROI:
+            if ((assistedROI==numpy.array([curBbox[3],0.0])).all(axis=(1,2))).any():
                 # ? lower left corner
                 cornerCount+=1
                 print('     (+,0) corner')
             
-            if [curBbox[3],curBbox[2]] in assistedROI:
+            if ((assistedROI==numpy.array([curBbox[3],curBbox[2]])).all(axis=(1,2))).any():
                 # ? lower right corner
                 cornerCount+=1
                 print('     (+,+) corner')
@@ -2989,11 +3122,18 @@ class AnnotatorJ(QWidget):
 
                 if self.invertedROI is None:
                     print('  null ROI on line #4137')
+                else:
+                    # swap with invertedROI
+                    tmp=deepcopy(self.invertedROI)
+                    self.invertedROI=deepcopy(assistedROI)
+                    assistedROI=deepcopy(tmp)
             
 
 
             # select the largest found object and delete all others
             assistedROI=self.selectLargestROI(assistedROI)
+
+            #self.assistedROI=deepcopy(assistedROI)
 
         
         return assistedROI
@@ -3001,7 +3141,7 @@ class AnnotatorJ(QWidget):
 
 
     # get the largest roi if multiple objects were detected on the mask
-    def selectLargestROI(self,ROI2check):
+    def selectLargestROI(self,ROI2check,box=None):
         if type(ROI2check) is tuple:
             pass
         elif type(ROI2check) is numpy.ndarray:
@@ -3015,13 +3155,33 @@ class AnnotatorJ(QWidget):
 
         # here we have the largest object index as maxIdx
         ROI2checkRet=ROI2check[maxIdx]
+
+        if box is not None:
+            # get 2nd largest as invertedROI
+            ROI2check=list(ROI2check)
+            ROI2check.pop(maxIdx)
+            if len(ROI2check)>0:
+                maxSize=0
+                for idx,x in enumerate(ROI2check):
+                    if x.shape[0]>maxSize:
+                        maxSize=x.shape[0]
+                        maxIdx=idx
+                #self.invertedROI=numpy.array(numpy.fliplr(numpy.squeeze(ROI2check[maxIdx]+[box[0],box[1]])))
+                #self.invertedROI=numpy.array(numpy.squeeze(ROI2check[maxIdx]+[box[0],box[1]]))
+                # check inv roi
+                x,y,w,h=cv2.boundingRect(ROI2check[maxIdx])
+                if w<=1 or h<=1:
+                    self.invertedROI=None
+                else:
+                    self.invertedROI=ROI2check[maxIdx]
+
         return ROI2checkRet
 
 
     def postProcessAssistedROI(self,assistedROI,tmpBbox,maskImage,closeMaskIm,imp,storeRoiCoords):
 
         # validate current ROI and check if it needs to be inverted
-        assistedROI=self.validateROI(assistedROI,maskImage)
+        assistedROI=self.validateROI(assistedROI,maskImage,tmpBbox)
 
         if assistedROI is None:
             print('  >> failed to create new contour')
