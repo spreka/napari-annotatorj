@@ -1554,7 +1554,8 @@ class AnnotatorJ(QWidget):
     def addFreeROIdrawing(self,shapesLayer=None):
         if shapesLayer is not None:
             shapesLayer.events.data.connect(self.updateNewROIprops,position='last')
-            shapesLayer.mouse_drag_callbacks.append(self.freeHandROI)
+            #shapesLayer.mouse_drag_callbacks.append(self.freeHandROI)
+            shapesLayer.mouse_drag_callbacks.append(self.freeHandROIvis)
             shapesLayer.mouse_drag_callbacks.append(self.editROI)
             shapesLayer.mouse_drag_callbacks.append(self.limitBBox2ImageSize)
         else:
@@ -1580,7 +1581,8 @@ class AnnotatorJ(QWidget):
     def addFreeROIdrawingCA(self,shapesLayer=None):
         if shapesLayer is not None:
             #shapesLayer.events.data.connect(self.contAssistROI,position='last')
-            shapesLayer.mouse_drag_callbacks.append(self.freeHandROI)
+            #shapesLayer.mouse_drag_callbacks.append(self.freeHandROI)
+            shapesLayer.mouse_drag_callbacks.append(self.freeHandROIvis)
             shapesLayer.mouse_drag_callbacks.append(self.editROI)
         else:
             return
@@ -1624,23 +1626,47 @@ class AnnotatorJ(QWidget):
 
     # this does not work yet:
     #@x.mouse_drag_callbacks.append
-    def freeHandROIvis(layer, event):
+    def freeHandROIvis(self,layer, event):
         yield
         if layer.mode=='add_polygon':
+            self.viewer.window.qt_viewer.layer_to_visual[layer].node._subvisuals[3].visible=False
             dragged=False
             #self.defColour='white'
+            curpos=list(layer.world_to_data(event.position))
+            coords=[]
+            coords.append(curpos)
+            started=False
             # on move
             while event.type == 'mouse_move':
                 dragged = True
-                coords = list(layer.world_to_data(event.position))
-                # this is not working yet:
-                mouse_bindings.vertex_insert(layer,event)
+                if not started:
+                    curpos=list(layer.world_to_data(event.position))
+                    coords.append(curpos)
+                    #layer.add(data=coords,shape_type='polygon',edge_width=1.0,edge_color='white',face_color=[0,0,0,0])
+                    #layer.refresh()
+                    started=True
+                else:
+                    coords = list(layer.world_to_data(event.position))
+                    newcoords=layer.data[-1].tolist()
+                    newcoords.append(coords)
+                    layer._data_view.edit(layer.nshapes-1, newcoords)
+                    layer.refresh()
                 yield
             # on release
             if dragged:
                 # drag ended
                 # mimic an 'esc' key press to quit the basic add_polygon method
                 key_bindings.finish_drawing_shape(layer)
+                # remove the duplicated shape
+                if not self.contAssist and not self.inAssisting:
+                    layer._data_view.remove(layer.nshapes-1)
+                layer.refresh()
+
+                if self.contAssist and not self.inAssisting:
+                    self.contAssistROI()
+                pass
+            if not self.contAssist:
+                self.viewer.window.qt_viewer.layer_to_visual[layer].node._subvisuals[3].visible=True
             # else: do nothing
             #    print('clicked!')
         # else: do nothing
@@ -2170,7 +2196,7 @@ class AnnotatorJ(QWidget):
         roiLayer.mode='add_polygon'
 
         contAssistLayer=self.addContAssistLayer()
-        self.addFreeROIdrawingCA(contAssistLayer)
+        self.addFreeROIdrawingCA(shapesLayer=contAssistLayer)
         contAssistLayer.mode='add_polygon'
 
         # bring the ROI layer forward
@@ -3258,7 +3284,7 @@ class AnnotatorJ(QWidget):
             #self.viewer.layers.remove(contAssistLayer)
             return contAssistLayer
         else:
-            shapesLayer2=Shapes(name='contourAssist',shape_type='polygon',edge_width=2,edge_color=curColour,face_color=[0,0,0,0])
+            shapesLayer2=Shapes(name='contourAssist',shape_type='polygon',edge_width=2*self.annotEdgeWidth,edge_color=curColour,face_color=[0,0,0,0])
             self.viewer.add_layer(shapesLayer2)
             return shapesLayer2
 
@@ -3462,7 +3488,7 @@ class AnnotatorJ(QWidget):
 
             # add drawing layer for contour assist
             shapesLayer2=self.addContAssistLayer()
-            self.addFreeROIdrawingCA(shapesLayer2)
+            self.addFreeROIdrawingCA(shapesLayer=shapesLayer2)
 
             shapesLayer2.mode='add_polygon'
 
@@ -4167,12 +4193,14 @@ class ClassesFrame(QWidget):
 
     def addNewClass(self):
         # add new class to list
+        '''
         lastClassName=self.annotatorjObj.classFrameNames[-1]
         lastClassNum=-1
         if lastClassName is None:
             lastClassNum=len(self.annotatorjObj.classNameLUT)
         else:
             lastClassNum=int(lastClassName[lastClassName.index("_")+1:len(lastClassName)])
+        '''
         
         lastClassNum=-1
         for key in self.annotatorjObj.classNameLUT:
