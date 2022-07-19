@@ -504,14 +504,18 @@ class AnnotatorJ(QWidget):
         if self.curFileIdx==0:
             # first image in folder, inactivate prev:
             self.buttonPrev.setEnabled(False)
+            self.buttonPrev.setStyleSheet(f"min-width: {int(self.bsize2/2)}px; color: gray")
         else:
             self.buttonPrev.setEnabled(True)
+            self.buttonPrev.setStyleSheet(f"min-width: {int(self.bsize2/2)}px; color: white")
 
         if self.curFileIdx==len(self.curFileList)-1:
             # last image, inactivate next:
             self.buttonNext.setEnabled(False)
+            self.buttonNext.setStyleSheet(f"min-width: {int(self.bsize2/2)}px; color: gray")
         else:
             self.buttonNext.setEnabled(True)
+            self.buttonNext.setStyleSheet(f"min-width: {int(self.bsize2/2)}px; color: white")
 
 
         # fetch annotation type from settings
@@ -531,6 +535,9 @@ class AnnotatorJ(QWidget):
             # save it
             self.SaveNewProp('selectedAnnotationType',self.selectedAnnotationType)
 
+        # init chkbox settings
+        self.initChkBoxes()
+
         # instance annotation type
         if self.selectedAnnotationType=='instance':
             # set freehand selection tool by default
@@ -539,79 +546,14 @@ class AnnotatorJ(QWidget):
                 self.initRoiManager()
                 roiLayer=self.findROIlayer()
             roiLayer.mode='add_polygon'
-            if self.freeHandROI not in roiLayer.mouse_drag_callbacks:
-                roiLayer.mouse_drag_callbacks.append(self.freeHandROI)
-            if not self.contAssist:
-                # contAssist is off
-                if not self.editMode:
-                    # edit mode is off
-                    if not self.classMode:
-                        # class mode is off
-                        # enable contour correction
-                        #self.chckbxAddAutomatically.setEnabled(True)
-                        #chckbxStepThroughContours.setEnabled(True)
-                        self.chckbxContourAssist.setEnabled(True)
-                    else:
-                        # class mode is on
-                        # disable the others
-                        #self.chckbxAddAutomatically.setChecked(False)
-                        #self.chckbxAddAutomatically.setEnabled(False)
-                        #self.chckbxStepThroughContours.setChecked(False)
-                        #self.chckbxStepThroughContours.setEnabled(False)
-                        self.chckbxContourAssist.setChecked(False)
-                        self.chckbxContourAssist.setEnabled(False)
-
-                        self.chckbxClass.setEnabled(True)
-
-                        self.editMode=False
-                        self.addAuto=False
-                        contAssist=False
-                    
-                else:
-                    # edit mode is on
-                    # disable contour correction
-                    #self.chckbxAddAutomatically.setChecked(False)
-                    #self.chckbxAddAutomatically.setEnabled(False)
-                    #self.chckbxStepThroughContours.setEnabled(True)
-                    self.chckbxContourAssist.setChecked(False)
-                    self.chckbxContourAssist.setEnabled(False)
-
-                    self.chckbxClass.setChecked(False)
-                    self.chckbxClass.setEnabled(False)
-
-                    self.addAuto=False
-                    self.classMode=False
-
-            else:
-                # contAssist is on
-                #self.chckbxAddAutomatically.setChecked(False)
-                #self.chckbxAddAutomatically.setEnabled(False)
-                #self.chckbxStepThroughContours.setChecked(False)
-                #self.chckbxStepThroughContours.setEnabled(False)
-                self.chckbxContourAssist.setEnabled(True)
-
-                self.chckbxClass.setChecked(False)
-                self.chckbxClass.setEnabled(False)
-
-                self.editMode=False
-                self.addAuto=False
-                self.classMode=False
+            if self.freeHandROIvis not in roiLayer.mouse_drag_callbacks:
+                roiLayer.mouse_drag_callbacks.append(self.freeHandROIvis)
+            
+            # chkbx setting moved to its own fcn initChkBoxes
         
         # semantic painting annotation type
         elif self.selectedAnnotationType=='semantic':
-            # disable contour correction
-            self.addAuto=False
-            self.editMode=False
-            self.contAssist=False
-            self.classMode=False
-            #self.chckbxStepThroughContours.setChecked(False)
-            self.chckbxContourAssist.setChecked(False)
-            #self.chckbxAddAutomatically.setChecked(False)
-            #self.chckbxAddAutomatically.setEnabled(False)
-            self.chckbxContourAssist.setEnabled(False)
-            #self.chckbxStepThroughContours.setEnabled(False)
-            self.chckbxClass.setChecked(False)
-            self.chckbxClass.setEnabled(False)
+            # chkbx setting moved to its own fcn initChkBoxes
 
             # remove default ROI layer if present
             roiLayer=self.findROIlayer()
@@ -647,18 +589,10 @@ class AnnotatorJ(QWidget):
                 self.initRoiManager()
                 roiLayer=self.findROIlayer()
             roiLayer.mode='add_rectangle'
-            if self.freeHandROI in roiLayer.mouse_drag_callbacks:
-                roiLayer.mouse_drag_callbacks.remove(self.freeHandROI)
+            if self.freeHandROIvis in roiLayer.mouse_drag_callbacks:
+                roiLayer.mouse_drag_callbacks.remove(self.freeHandROIvis)
 
-            # disable contour correction
-            self.editMode=False
-            self.contAssist=False
-            #self.chckbxAddAutomatically.setEnabled(True)
-            #self.chckbxStepThroughContours.setChecked(False)
-            self.chckbxContourAssist.setChecked(False)
-            #self.chckbxStepThroughContours.setEnabled(False)
-            self.chckbxContourAssist.setEnabled(False)
-            self.chckbxClass.setEnabled(True)
+            # chkbx setting moved to its own fcn initChkBoxes
 
 
         # TODO: add missing settings
@@ -679,6 +613,111 @@ class AnnotatorJ(QWidget):
 
         # when open function finishes:
         self.started=True
+
+
+    def initChkBoxes(self):
+        if self.selectedAnnotationType=='instance':
+            if not self.contAssist:
+                # contAssist is off
+                if not self.editMode:
+                    # edit mode is off
+                    if not self.classMode:
+                        # class mode is off
+                        # enable contour correction
+                        #self.chckbxAddAutomatically.setEnabled(True)
+                        self.chkEdit.setEnabled(True)
+                        self.chkEdit.setStyleSheet("color: white")
+                        self.chckbxContourAssist.setEnabled(True)
+                        self.chckbxContourAssist.setStyleSheet("color: white")
+                        self.chckbxClass.setEnabled(True)
+                        self.chckbxClass.setStyleSheet("color: white")
+                    else:
+                        # class mode is on
+                        # disable the others
+                        #self.chckbxAddAutomatically.setChecked(False)
+                        #self.chckbxAddAutomatically.setEnabled(False)
+                        self.chkEdit.setChecked(False)
+                        self.chkEdit.setEnabled(False)
+                        self.chkEdit.setStyleSheet("color: gray")
+                        self.chckbxContourAssist.setChecked(False)
+                        self.chckbxContourAssist.setEnabled(False)
+                        self.chckbxContourAssist.setStyleSheet("color: gray")
+
+                        self.chckbxClass.setEnabled(True)
+                        self.chckbxClass.setStyleSheet("color: white")
+
+                        self.editMode=False
+                        self.addAuto=False
+                        self.contAssist=False
+                    
+                else:
+                    # edit mode is on
+                    # disable contour correction
+                    #self.chckbxAddAutomatically.setChecked(False)
+                    #self.chckbxAddAutomatically.setEnabled(False)
+                    self.chkEdit.setEnabled(True)
+                    self.chkEdit.setStyleSheet("color: white")
+                    self.chckbxContourAssist.setChecked(False)
+                    self.chckbxContourAssist.setEnabled(False)
+                    self.chckbxContourAssist.setStyleSheet("color: gray")
+
+                    self.chckbxClass.setChecked(False)
+                    self.chckbxClass.setEnabled(False)
+                    self.chckbxClass.setStyleSheet("color: gray")
+
+                    self.addAuto=False
+                    self.classMode=False
+
+            else:
+                # contAssist is on
+                #self.chckbxAddAutomatically.setChecked(False)
+                #self.chckbxAddAutomatically.setEnabled(False)
+                self.chkEdit.setChecked(False)
+                self.chkEdit.setEnabled(False)
+                self.chkEdit.setStyleSheet("color: gray")
+                self.chckbxContourAssist.setEnabled(True)
+                self.chckbxContourAssist.setStyleSheet("color: white")
+
+                self.chckbxClass.setChecked(False)
+                self.chckbxClass.setEnabled(False)
+                self.chckbxClass.setStyleSheet("color: gray")
+
+                self.editMode=False
+                self.addAuto=False
+                self.classMode=False
+        
+        # semantic painting annotation type
+        elif self.selectedAnnotationType=='semantic':
+            # disable contour correction
+            self.addAuto=False
+            self.editMode=False
+            self.contAssist=False
+            self.classMode=False
+            self.chckbxContourAssist.setChecked(False)
+            #self.chckbxAddAutomatically.setChecked(False)
+            #self.chckbxAddAutomatically.setEnabled(False)
+            self.chckbxContourAssist.setEnabled(False)
+            self.chckbxContourAssist.setStyleSheet("color: gray")
+            self.chckbxClass.setChecked(False)
+            self.chckbxClass.setEnabled(False)
+            self.chckbxClass.setStyleSheet("color: gray")
+            self.chkEdit.setChecked(False)
+            self.chkEdit.setEnabled(False)
+            self.chkEdit.setStyleSheet("color: gray")
+
+        elif self.selectedAnnotationType=='bbox':
+            # disable contour correction
+            self.editMode=False
+            self.contAssist=False
+            #self.chckbxAddAutomatically.setEnabled(True)
+            self.chkEdit.setChecked(False)
+            self.chckbxContourAssist.setChecked(False)
+            self.chkEdit.setEnabled(False)
+            self.chkEdit.setStyleSheet("color: gray")
+            self.chckbxContourAssist.setEnabled(False)
+            self.chckbxContourAssist.setStyleSheet("color: gray")
+            self.chckbxClass.setEnabled(True)
+            self.chckbxClass.setStyleSheet("color: white")
 
 
     def loadROIs(self):
@@ -1631,7 +1670,7 @@ class AnnotatorJ(QWidget):
         if layer.mode=='add_polygon':
             self.viewer.window.qt_viewer.layer_to_visual[layer].node._subvisuals[3].visible=False
             dragged=False
-            #self.defColour='white'
+            #self.defColour='white' 
             curpos=list(layer.world_to_data(event.position))
             coords=[]
             coords.append(curpos)
@@ -1660,6 +1699,7 @@ class AnnotatorJ(QWidget):
                 # remove the duplicated shape
                 if not self.contAssist and not self.inAssisting:
                     layer._data_view.remove(layer.nshapes-1)
+                    layer.add(data=newcoords,shape_type='polygon',edge_width=self.annotEdgeWidth,edge_color=self.defColour,face_color=[0,0,0,0])
                 layer.refresh()
 
                 if self.contAssist and not self.inAssisting:
@@ -3542,6 +3582,9 @@ class AnnotatorJ(QWidget):
 
 
     def setClassMode(self,state):
+        if self.selectedAnnotationType=='semantic':
+            warnings.warn('Class mode is not supported in semantic annotation type')
+            return
         shapesLayer=self.findROIlayer()
         if state == Qt.Checked:
             self.classMode=True
@@ -3556,6 +3599,7 @@ class AnnotatorJ(QWidget):
             self.contAssist=False
             self.chckbxContourAssist.setChecked(False)
             self.chckbxContourAssist.setEnabled(False)
+            self.chckbxContourAssist.setStyleSheet("color: gray")
 
             self.editMode=False
             #self.chckbxStepThroughContours.setChecked(False)
@@ -3574,6 +3618,10 @@ class AnnotatorJ(QWidget):
                 shapesLayer.mouse_drag_callbacks.remove(mouse_bindings.select)
             if self.classifyROI not in shapesLayer.mouse_drag_callbacks:
                 shapesLayer.mouse_drag_callbacks.append(self.classifyROI)
+                self.viewer.window.qt_viewer.layer_to_visual[shapesLayer].node._subvisuals[1].visible=False
+                self.viewer.window.qt_viewer.layer_to_visual[shapesLayer].node._subvisuals[2].visible=False
+                self.viewer.window.qt_viewer.layer_to_visual[shapesLayer].node._subvisuals[3].visible=False
+                shapesLayer.bind_key('Space',func=self.hold_to_pan_zoom)
 
 
         else:
@@ -3581,6 +3629,7 @@ class AnnotatorJ(QWidget):
             print('Class mode cleared')
 
             self.chckbxContourAssist.setEnabled(True)
+            self.chckbxContourAssist.setStyleSheet("color: white")
             if self.classesFrame is not None:
                 self.classesFrame.closeClassesFrame()
 
@@ -3590,8 +3639,16 @@ class AnnotatorJ(QWidget):
                 shapesLayer.mouse_drag_callbacks.remove(self.customShapesLayerSelect)
             if self.classifyROI in shapesLayer.mouse_drag_callbacks:
                 shapesLayer.mouse_drag_callbacks.remove(self.classifyROI)
+                self.viewer.window.qt_viewer.layer_to_visual[shapesLayer].node._subvisuals[1].visible=True
+                self.viewer.window.qt_viewer.layer_to_visual[shapesLayer].node._subvisuals[2].visible=True
+                self.viewer.window.qt_viewer.layer_to_visual[shapesLayer].node._subvisuals[3].visible=True
 
-            shapesLayer.mode='add_polygon'
+            if self.selectedAnnotationType=='instance':
+                shapesLayer.mode='add_polygon'
+            elif self.selectedAnnotationType=='bbox':
+                shapesLayer.mode='add_rectangle'
+            elif self.selectedAnnotationType=='semantic':
+                pass
 
 
     def showOverlay(self,state):
@@ -3874,6 +3931,30 @@ class AnnotatorJ(QWidget):
 
         if update_thumbnail:
             layer._update_thumbnail()
+
+
+    # modified version of the "space" key binding to zoom on the image
+    #@Shapes.bind_key('Space',overwrite=True)
+    #def hold_to_pan_zoom(layer: Shapes):
+    def hold_to_pan_zoom(self,layer):
+        """Hold to pan and zoom in the viewer."""
+        if layer._mode != 'pan_zoom':
+            # on key press
+            prev_mode = layer.mode
+            #prev_selected = layer.selected_data.copy()
+            layer.mode = 'pan_zoom'
+
+            yield
+
+            # on key release
+            layer.mode = prev_mode
+            layer.selected_data=set()
+            self.viewer.window.qt_viewer.layer_to_visual[layer].node._subvisuals[1].visible=False
+            self.viewer.window.qt_viewer.layer_to_visual[layer].node._subvisuals[2].visible=False
+            self.viewer.window.qt_viewer.layer_to_visual[layer].node._subvisuals[3].visible=False
+            layer.refresh()
+            #layer.selected_data = prev_selected
+            #layer._set_highlight()
 
 
     def openOptionsFrame(self):
@@ -6464,16 +6545,18 @@ class OptionsFrame(QWidget):
                     self.annotatorjObj.initRoiManager()
                     roiLayer=self.annotatorjObj.findROIlayer()
                 roiLayer.mode='add_polygon'
-                if self.annotatorjObj.freeHandROI not in roiLayer.mouse_drag_callbacks:
-                    roiLayer.mouse_drag_callbacks.append(self.annotatorjObj.freeHandROI)
+                if self.annotatorjObj.freeHandROIvis not in roiLayer.mouse_drag_callbacks:
+                    roiLayer.mouse_drag_callbacks.append(self.annotatorjObj.freeHandROIvis)
+                self.annotatorjObj.viewer.layers.selection.add(roiLayer)
             elif newAnnotType=='bbox':
                 roiLayer=self.annotatorjObj.findROIlayer()
                 if roiLayer is None:
                     self.annotatorjObj.initRoiManager()
                     roiLayer=self.annotatorjObj.findROIlayer()
                 roiLayer.mode='add_rectangle'
-                if self.annotatorjObj.freeHandROI in roiLayer.mouse_drag_callbacks:
-                    roiLayer.mouse_drag_callbacks.remove(self.annotatorjObj.freeHandROI)
+                if self.annotatorjObj.freeHandROIvis in roiLayer.mouse_drag_callbacks:
+                    roiLayer.mouse_drag_callbacks.remove(self.annotatorjObj.freeHandROIvis)
+                self.annotatorjObj.viewer.layers.selection.add(roiLayer)
             elif newAnnotType=='semantic':
                 labelLayer=self.annotatorjObj.findLabelsLayerName(layerName='semantic')
                 if labelLayer is None:
@@ -6488,6 +6571,9 @@ class OptionsFrame(QWidget):
                 labelLayer.mode='paint'
                 labelLayer.brush_size=self.annotatorjObj.semanticBrushSize
                 labelLayer.opacity=0.5
+
+        # init chkbox settings
+        self.annotatorjObj.initChkBoxes()
 
 
     def cancelOptions(self):
