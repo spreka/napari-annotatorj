@@ -2470,7 +2470,7 @@ class AnnotatorJ(QWidget):
 
     def initROItextProps(self):
         roiLayer=self.findROIlayer()
-        initProps={'name': array(['0001'], dtype='<U4'),'class': array([0]),'nameInt': array([1])}
+        initProps={'name': numpy.array(['0001'], dtype='<U4'),'class': numpy.array([0]),'nameInt': numpy.array([1])}
         roiLayer.text.add(initProps,1)
 
 
@@ -4224,9 +4224,12 @@ class ClassesFrame(QWidget):
                 curClassName=el
                 if curClassName is None:
                     continue
-                self.annotatorjObj.listModelClasses.append(curClassName)
-                self.comboBoxDefaultClass.addItem(curClassName)
-                self.classListList.insertItem(i,curClassName)
+                if curClassName not in self.annotatorjObj.listModelClasses:
+                    self.annotatorjObj.listModelClasses.append(curClassName)
+                if self.comboBoxDefaultClass.findText(curClassName)<0:
+                    self.comboBoxDefaultClass.addItem(curClassName)
+                if len(self.classListList.findItems(curClassName,Qt.MatchExactly))==0:
+                    self.classListList.insertItem(i,curClassName)
 
                 curClassNum=int(curClassName[curClassName.find("_")+1:])
                 print(f'classFrameNames.[i]: {self.annotatorjObj.classFrameNames[i]}, curClassNum: {curClassNum}')
@@ -4242,7 +4245,7 @@ class ClassesFrame(QWidget):
                 print('Could not find the selected class in the list of classes, using the first.')
                 selectedClassIdxList=0
                 self.classListList.setCurrentItem(self.classListList.item(0))
-                tmpString=classListList.currentItem().text()
+                tmpString=self.classListList.currentItem().text()
                 if tmpString is None or tmpString=='None':
                     # failed to find the selected item in the list
                     self.annotatorjObj.selectedClassNameNumber=-1
@@ -4388,6 +4391,10 @@ class ClassesFrame(QWidget):
                 print('Could not find the currently selected class name in the list for deletion. Please try again.')
                 return
 
+            #comboBoxDefaultClass.removeItemAt(selectedClassIdxList+1); # default class selector has "(none)" as the first element
+            self.comboBoxDefaultClass.removeItem(self.comboBoxDefaultClass.findText(selectedClassName))
+            self.classListList.takeItem(self.classListList.row(self.classListList.currentItem()))
+
             self.annotatorjObj.classFrameNames.pop(selectedClassIdxList)
             self.annotatorjObj.classFrameColours.pop(selectedClassIdxList)
             self.annotatorjObj.listModelClasses.remove(selectedClassName)
@@ -4407,10 +4414,6 @@ class ClassesFrame(QWidget):
                 #unClassifyClass(defaultClassNumber);
                 self.annotatorjObj.defaultClassNumber=0 #-1
                 self.defaultClassColour=None
-
-            #comboBoxDefaultClass.removeItemAt(selectedClassIdxList+1); # default class selector has "(none)" as the first element
-            self.comboBoxDefaultClass.removeItem(self.comboBoxDefaultClass.findText(selectedClassName))
-            self.classListList.takeItem(self.classListList.row(self.classListList.currentItem()))
 
             print(f'Deleted class "{selectedClassName}" from the class list')
 
@@ -4650,7 +4653,7 @@ class ClassesFrame(QWidget):
             print("Cannot find objects for the current image")
             return
         elif self.annotatorjObj.defaultClassNumber<1:
-            print(f'Cannot set the default class to "{defaultClassNumber}". Must be >0.')
+            print(f'Cannot set the default class to "{self.annotatorjObj.defaultClassNumber}". Must be >0.')
             return
 
         else:
