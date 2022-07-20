@@ -453,6 +453,7 @@ class AnnotatorJ(QWidget):
 
         # set roi edge width for visibility
         s=imageLayer.data.shape
+        self.imgSize=s
         if (s[0]<=300) and (s[1]<=300):
             self.annotEdgeWidth=0.5
         elif (s[0]>300 and s[0]<=500) or (s[1]>300 and s[1]<=500):
@@ -1597,6 +1598,7 @@ class AnnotatorJ(QWidget):
             shapesLayer.mouse_drag_callbacks.append(self.freeHandROIvis)
             shapesLayer.mouse_drag_callbacks.append(self.editROI)
             shapesLayer.mouse_drag_callbacks.append(self.limitBBox2ImageSize)
+            #shapesLayer.mouse_drag_callbacks.append(self.limitROI2ImageSize)
         else:
             return
         return
@@ -1672,6 +1674,9 @@ class AnnotatorJ(QWidget):
             dragged=False
             #self.defColour='white' 
             curpos=list(layer.world_to_data(event.position))
+            if self.imgSize is not None:
+                curpos[0]=min(max(curpos[0],0),self.imgSize[0]-1)
+                curpos[1]=min(max(curpos[1],0),self.imgSize[1]-1)
             coords=[]
             coords.append(curpos)
             started=False
@@ -1680,13 +1685,27 @@ class AnnotatorJ(QWidget):
                 dragged = True
                 if not started:
                     curpos=list(layer.world_to_data(event.position))
+                    if self.imgSize is not None:
+                        curpos[0]=min(max(curpos[0],0),self.imgSize[0]-1)
+                        curpos[1]=min(max(curpos[1],0),self.imgSize[1]-1)
                     coords.append(curpos)
                     #layer.add(data=coords,shape_type='polygon',edge_width=1.0,edge_color='white',face_color=[0,0,0,0])
                     #layer.refresh()
                     started=True
                 else:
                     coords = list(layer.world_to_data(event.position))
+                    if self.imgSize is not None:
+                        coords[0]=min(max(coords[0],0),self.imgSize[0]-1)
+                        coords[1]=min(max(coords[1],0),self.imgSize[1]-1)
                     newcoords=layer.data[-1].tolist()
+                    
+                    if len(newcoords)==2:
+                        # just started, correct coords
+                        newcoords[0][0]=min(max(newcoords[0][0],0),self.imgSize[0]-1)
+                        newcoords[0][1]=min(max(newcoords[0][1],0),self.imgSize[1]-1)
+                        newcoords[1][0]=min(max(newcoords[1][0],0),self.imgSize[0]-1)
+                        newcoords[1][1]=min(max(newcoords[1][1],0),self.imgSize[1]-1)
+                    
                     newcoords.append(coords)
                     layer._data_view.edit(layer.nshapes-1, newcoords)
                     layer.refresh()
@@ -1698,8 +1717,12 @@ class AnnotatorJ(QWidget):
                 key_bindings.finish_drawing_shape(layer)
                 # remove the duplicated shape
                 if not self.contAssist and not self.inAssisting:
-                    layer._data_view.remove(layer.nshapes-1)
-                    layer.add(data=newcoords,shape_type='polygon',edge_width=self.annotEdgeWidth,edge_color=self.defColour,face_color=[0,0,0,0])
+                    try:
+                        layer._data_view.remove(layer.nshapes-1)
+                        layer.add(data=newcoords,shape_type='polygon',edge_width=self.annotEdgeWidth,edge_color=self.defColour,face_color=[0,0,0,0])
+                    except Exception as e:
+                        print(e)
+                        warnings.warn('Failed to create roi, please try again')
                 layer.refresh()
 
                 if self.contAssist and not self.inAssisting:
@@ -2484,6 +2507,46 @@ class AnnotatorJ(QWidget):
                     layer.remove_selected()
                     layer.add_rectangles(curData)
                     layer.refresh()
+                else:
+                    return
+        else:
+            return
+
+
+    def limitROI2ImageSize(self,layer,event):
+        yield
+        
+        if layer.mode=='add_polygon' and self.selectedAnnotationType=='instance':
+            # limit drawn roi to image size
+            dragged=False
+            # on move
+            while event.type == 'mouse_move':
+                dragged = True
+                yield
+            # on release
+            if dragged:
+                # drag ended
+                imageLayer=self.findImageLayer()
+                if imageLayer is not None:
+                    s=imageLayer.data.shape
+                    self.imgSize=s
+
+                    n=len(layer.data)-1
+                    curData=layer.data[n]
+                    for idx,c in enumerate(curData):
+                        x,y=c
+                        x=min(max(x,0),s[0]-1)
+                        y=min(max(y,0),s[1]-1)
+                        curData[idx,:]=[x,y]
+
+                    try:
+                        layer.selected_data={n}
+                        layer.remove_selected()
+                        layer.add_polygons(curData)
+                        layer.refresh()
+                    except Exception as e:
+                        print(e)
+                        warnings.warn('Failed to limit ROI to image size, please try again')
                 else:
                     return
         else:
