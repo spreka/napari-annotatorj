@@ -4374,6 +4374,14 @@ class ClassesFrame(QWidget):
             # assign the first colour
             self.annotatorjObj.classFrameColours.append(0)
 
+        if self.classListList.count()==1:
+            # this is the only class in the list
+            # set props
+            self.annotatorjObj.selectedClassNameNumber=-2
+            self.annotatorjObj.selectedClassColourIdx=None
+            # select this class
+            self.classListList.setCurrentItem(self.classListList.item(0))
+
 
     def deleteClass(self):
         # see if there are classes in the list
@@ -4425,12 +4433,14 @@ class ClassesFrame(QWidget):
 
                 # store currently selected class's number for ROI grouping
                 self.annotatorjObj.selectedClassNameNumber=int(selectedClassNameVar[selectedClassNameVar.find("_")+1:])
-                self.selectedClassIdxList=self.annotatorjObj.classFrameNames.index(selectedClassNameVar)
+                selectedClassIdxList=self.annotatorjObj.classFrameNames.index(selectedClassNameVar)
 
-                self.setColourRadioButton(selectedClassNameVar,self.selectedClassIdxList)
+                self.setColourRadioButton(selectedClassNameVar,selectedClassIdxList)
             else:
                 # deleted the last class
                 # allow this?
+                self.annotatorjObj.selectedClassNameNumber=-2
+                self.annotatorjObj.selectedClassColourIdx=None
                 pass
 
 

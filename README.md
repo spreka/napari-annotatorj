@@ -127,7 +127,7 @@ Shape contour points are tracked automatically when the left mouse button is hel
 
 Click to watch demo video below.
 
-[![instance-annot-demo](https://drive.google.com/uc?export=view&id=1Qd0LirjJX1Gvy_NWJ2eBV74vQjDQt5Gn)](https://drive.google.com/uc?export=view&id=18bIaqNboGMAwEN_bBnPnyXEbkAgNBmQ0)
+[![instance-annot-demo](https://drive.google.com/uc?export=view&id=1sBg19d_hqGH-UI8irkrwame7ZjrldwHr)](https://drive.google.com/uc?export=view&id=1wELreE9MdCZq4Kf4oCWdxIw4e5o05XzK "Click to watch instance annotation demo")
 
 ***
 ## Semantic annotation
@@ -160,7 +160,7 @@ Assisted annotation via a pre-trained deep learning model's suggested contour.
 
 Click to watch demo video below
 
-[![contour-assist-demo](https://drive.google.com/uc?export=view&id=1xAGJu1SeM3mxMgxTQ-uIBECDEFNZL-8L)](https://drive.google.com/uc?export=view&id=1VTd6RScjNfAwi3vMk-bU87U4ucPmOO_M "Click to watch contour assist demo")
+[![contour-assist-demo](https://drive.google.com/uc?export=view&id=1Mw2fCPdm5WHBVRgNnp8fGNmqxI84F_9I)](https://drive.google.com/uc?export=view&id=1VTd6RScjNfAwi3vMk-bU87U4ucPmOO_M "Click to watch contour assist demo")
 
 ***
 ## Edit mode
@@ -180,7 +180,7 @@ Allows to modify created objects with a brush tool.
 
 Click to watch demo video below
 
-[![edit-mode-demo](https://drive.google.com/uc?export=view&id=1Mqjd6hdKyE24xXEOlyLO1yai3hnGSEyR)](https://drive.google.com/uc?export=view&id=10MQm53hblLKQlfBNrfUsi1vxvIdTbzCZ "Click to watch edit mode demo")
+[![edit-mode-demo](https://drive.google.com/uc?export=view&id=1M-XdEWPXMsIOtO0ncyUtvGACS0SRX-3K)](https://drive.google.com/uc?export=view&id=10MQm53hblLKQlfBNrfUsi1vxvIdTbzCZ "Click to watch edit mode demo")
 
 ***
 ## Class mode
@@ -196,7 +196,7 @@ Allows to assign class labels to objects by clicking on shapes.
 
 Click to watch demo video below
 
-[![class-mode-demo](https://drive.google.com/uc?export=view&id=1sAuTTjPaFs_qlbIj3NQlht-UjI2WKsHr)](https://drive.google.com/uc?export=view&id=1uOmznUvfHEFvviWTtOnUHty8rkKyWR7Q "Click to watch class mode demo")
+[![class-mode-demo](https://drive.google.com/uc?export=view&id=1EV1cn_mySO11S_ZDFv6Dl1laAk30jGJk)](https://drive.google.com/uc?export=view&id=1uOmznUvfHEFvviWTtOnUHty8rkKyWR7Q "Click to watch class mode demo")
 
 ***
 ## Export
@@ -233,6 +233,11 @@ annotation_folder
 ```
 
 Multiple export options can be selected at once, any selected will create a subfolder in the folder where the annotations are saved.
+
+
+Click to watch demo video below
+
+[![exporter-demo](https://drive.google.com/uc?export=view&id=1QoaJrI9pKziUzYwiZNdWlfRD7PcvJB9U)](https://drive.google.com/uc?export=view&id=1uJz-x_ypEOjc7SYPUTqrEt0ieyNLFy6u "Click to watch exporter demo")
 
 ***
 ## Quick export
