@@ -155,6 +155,8 @@ class AnnotatorJ(QWidget):
         self.cancelledSaving=False
         self.newClassActive=False
 
+        self.prevTool=None
+
         # options
         self.optionsFrame=None
         self.selectedAnnotationType='instance'
@@ -247,6 +249,7 @@ class AnnotatorJ(QWidget):
         #self.chkSmooth.stateChanged.connect(self.setSmooth)
         # show contours
         self.chkShowContours = QCheckBox('Show contours')
+        self.chkShowContours.setToolTip('Toggle mode with <b>Shift+v</b>.')
         self.chkShowContours.setChecked(True)
         self.chkShowContours.stateChanged.connect(self.showCnt)
         # assist mode
@@ -609,11 +612,13 @@ class AnnotatorJ(QWidget):
         if self.classMode and (self.selectedAnnotationType=='bbox' or self.selectedAnnotationType=='instance'):
             self.chckbxClass.setChecked(False)
 
-        # enable shortcut for class mode
-        roiLayer.bind_key('c',func=self.toggleClassMode,overwrite=True)
-        roiLayer.bind_key('a',func=self.toggleContAssistMode,overwrite=True)
-        roiLayer.bind_key('Shift-e',func=self.toggleEditMode,overwrite=True)
-        roiLayer.bind_key('o',func=self.showOptionsWidget,overwrite=True)
+        # enable shortcut for checkbox modes
+        if self.selectedAnnotationType=='instance' or self.selectedAnnotationType=='bbox':
+            self.bindKeys(roiLayer)
+        else:
+            self.bindKeys(labelLayer)
+
+        self.prevTool=None
 
         # TODO: add missing settings
 
@@ -738,6 +743,22 @@ class AnnotatorJ(QWidget):
             self.chckbxContourAssist.setStyleSheet("color: gray")
             self.chckbxClass.setEnabled(True)
             self.chckbxClass.setStyleSheet("color: white")
+
+
+    def bindKeys(self,layer):
+        if type(layer) is Shapes:
+            # add Shapes-specific shortcuts here
+            layer.bind_key('c',func=self.toggleClassMode,overwrite=True)
+            if self.selectedAnnotationType=='instance':
+                layer.bind_key('a',func=self.toggleContAssistMode,overwrite=True)
+            layer.bind_key('Shift-e',func=self.toggleEditMode,overwrite=True)
+        elif type(layer) is Labels:
+            # add Labels-specific shortcuts here
+            pass
+
+        # add non layer-specific shortcuts here
+        layer.bind_key('o',func=self.showOptionsWidget,overwrite=True)
+        layer.bind_key('Shift-v',func=self.toggleShowContours,overwrite=True)
 
 
     def loadROIs(self):
@@ -3417,6 +3438,7 @@ class AnnotatorJ(QWidget):
             shapesLayer2=Shapes(name='contourAssist',shape_type='polygon',edge_width=2*self.annotEdgeWidth,edge_color=curColour,face_color=[0,0,0,0])
             self.viewer.add_layer(shapesLayer2)
             shapesLayer2.bind_key('a',func=self.toggleContAssistMode,overwrite=True)
+            shapesLayer2.bind_key('Shift-v',func=self.toggleShowContours,overwrite=True)
             return shapesLayer2
 
 
@@ -3550,17 +3572,17 @@ class AnnotatorJ(QWidget):
             self.editMode=True
             print('Edit mode selected')
 
-            # set the "select shapes" mode
-            shapesLayer.mode = 'select'
-
             self.contAssist=False
             self.chckbxContourAssist.setChecked(False)
+            self.chckbxClass.setChecked(False)
             self.chckbxContourAssist.setEnabled(False)
             self.chckbxContourAssist.setStyleSheet("color: gray")
-            self.chckbxClass.setChecked(False)
             self.chckbxClass.setEnabled(False)
             self.chckbxClass.setStyleSheet("color: gray")
             self.classMode=False
+
+            # set the "select shapes" mode
+            shapesLayer.mode = 'select'
 
         else:
             # close remaining editing temp layer if present
@@ -3600,11 +3622,35 @@ class AnnotatorJ(QWidget):
         shapesLayer=self.findROIlayer()
         if state == Qt.Checked:
             print('Show contours selected')
-            shapesLayer.visible=True
+            if shapesLayer is not None:
+                shapesLayer.visible=True
+                if self.prevTool is not None:
+                    shapesLayer.mode=self.prevTool
+                    self.prevTool=None
+
+                if self.contAssist:
+                    # reorder layers as in contour assist mode
+                    contAssistLayer=self.findROIlayer(layerName='contourAssist')
+            else:
+                # semantic annot mode
+                labelLayer=self.findLabelsLayerName(layerName='semantic')
+                if labelLayer is not None:
+                    labelLayer.visible=True
+                    if self.prevTool is not None:
+                        labelLayer.mode=self.prevTool
+                        self.prevTool=None
 
         else:
             print('Show contours cleared')
-            shapesLayer.visible=False
+            if shapesLayer is not None:
+                self.prevTool=shapesLayer.mode
+                shapesLayer.visible=False
+            else:
+                # semantic annot mode
+                labelLayer=self.findLabelsLayerName(layerName='semantic')
+                if labelLayer is not None:
+                    self.prevTool=labelLayer.mode
+                    labelLayer.visible=False
 
 
 
@@ -4057,13 +4103,19 @@ class AnnotatorJ(QWidget):
 
 
     def toggleClassMode(self,layer):
-        self.chckbxClass.setChecked(not self.chckbxClass.isChecked())
+        if self.chckbxClass.isEnabled():
+            self.chckbxClass.setChecked(not self.chckbxClass.isChecked())
 
     def toggleContAssistMode(self,layer):
-        self.chckbxContourAssist.setChecked(not self.chckbxContourAssist.isChecked())
+        if self.chckbxContourAssist.isEnabled():
+            self.chckbxContourAssist.setChecked(not self.chckbxContourAssist.isChecked())
 
     def toggleEditMode(self,layer):
-        self.chkEdit.setChecked(not self.chkEdit.isChecked())
+        if self.chkEdit.isEnabled():
+            self.chkEdit.setChecked(not self.chkEdit.isChecked())
+
+    def toggleShowContours(self,layer):
+        self.chkShowContours.setChecked(not self.chkShowContours.isChecked())
 
     def showOptionsWidget(self,layer):
         if self.optionsFrame is None:
@@ -6702,6 +6754,12 @@ class OptionsFrame(QWidget):
 
         # init chkbox settings
         self.annotatorjObj.initChkBoxes()
+
+        # enable shortcut for checkbox modes
+        if self.annotatorjObj.selectedAnnotationType=='instance' or self.annotatorjObj.selectedAnnotationType=='bbox':
+            self.annotatorjObj.bindKeys(roiLayer)
+        else:
+            self.annotatorjObj.bindKeys(labelLayer)
 
 
     def cancelOptions(self):
