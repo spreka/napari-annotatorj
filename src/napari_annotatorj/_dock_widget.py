@@ -187,44 +187,51 @@ class AnnotatorJ(QWidget):
         # add buttons and ui elements
         # ---------------------------
         self.btnOpen = QPushButton('Open')
+        self.btnOpen.setToolTip('Open original image file<br>')
         self.btnOpen.clicked.connect(self.openNew)
 
         self.btnLoad = QPushButton('Load')
+        self.btnLoad.setToolTip('Load annotation<br>file')
         self.btnLoad.clicked.connect(self.loadROIs)
 
         self.btnSave = QPushButton('Save')
+        self.btnSave.setToolTip('Save current<br>annotation to<br>file')
         self.btnSave.clicked.connect(self.saveData)
 
         self.btnOverlay = QPushButton('Overlay')
+        self.btnOverlay.setToolTip('Load an annotation<br>file as overlay')
         self.btnOverlay.clicked.connect(self.setOverlay)
 
         # quick export
         self.btnExport = QPushButton('[^]')
+        self.btnExport.setToolTip('Quick export<br>annotations')
         self.btnExport.clicked.connect(self.quickExport)
 
         # steppers
         self.buttonPrev = QPushButton('<')
+        self.buttonPrev.setToolTip('Open previous image<br>file from folder')
         self.buttonPrev.clicked.connect(self.prevImage)
         #self.buttonPrev.setEnabled(False)
 
         self.buttonNext = QPushButton('>')
+        self.buttonNext.setToolTip('Open next image<br>file from folder')
         self.buttonNext.clicked.connect(self.nextImage)
         #self.buttonNext.setEnabled(False)
 
         # options
         self.buttonOptions=QPushButton('...')
-        self.buttonOptions.setToolTip('Show options')
+        self.buttonOptions.setToolTip('Show options<br>.Toggle with <b>"o"</b>.')
         self.buttonOptions.clicked.connect(self.openOptionsFrame)
 
         self.btnColours=QPushButton('Colours')
-        self.btnColours.setToolTip('Set colour for annotations or overlay')
+        self.btnColours.setToolTip('Set colour<br>for annotations<br>or overlay')
         self.btnColours.clicked.connect(self.addColourWidget)
 
         # checkboxes
         # edit mode
         self.chkEdit = QCheckBox('Edit mode')
         self.chkEdit.setChecked(False)
-        self.chkEdit.setToolTip('Allows switching to contour edit mode. Select with mouse click, accept with "q".')
+        self.chkEdit.setToolTip('Allows switching to contour edit <br>mode. Toggle mode with <b>Shift+"e"</b>.<br>Select with mouse click, accept with "q", revert with "Esc".')
         self.chkEdit.stateChanged.connect(self.setEditMode)
 
         # add auto mode
@@ -245,7 +252,7 @@ class AnnotatorJ(QWidget):
         # assist mode
         self.chckbxContourAssist = QCheckBox('Contour assist')
         self.chckbxContourAssist.setChecked(False)
-        self.chckbxContourAssist.setToolTip('Helps fit contour to object boundaries. Press \"q\" to add contour after correction. Press Ctrl+\"delete\" to delete suggested contour. (You must press either before you could continue!)')
+        self.chckbxContourAssist.setToolTip('Helps fit contour to object boundaries.<br>Toggle mode with <b>"a"</b>.<br>Press \"q\" to add contour after correction.<br>Press Ctrl+\"delete\" to delete suggested<br>contour. (You must press either before<br>you could continue!)')
         self.chckbxContourAssist.stateChanged.connect(self.setContourAssist)
         # show overlay
         self.chkShowOverlay = QCheckBox('Show overlay')
@@ -255,12 +262,13 @@ class AnnotatorJ(QWidget):
         self.chckbxClass = QCheckBox('Class mode')
         self.chckbxClass.setChecked(False)
         self.chckbxClass.stateChanged.connect(self.setClassMode)
-        self.chckbxClass.setToolTip('Allows switching to contour classification mode. Select with mouse click.')
+        self.chckbxClass.setToolTip('Allows switching to contour<br>classification mode.<br>Toggle mode with <b>"c"</b>.<br>Select with mouse click.')
 
 
         # add labels
         self.roiLabel=QLabel('ROIs')
         self.lblCurrentFile=QLabel('(1/1) [image name]')
+        self.lblCurrentFile.setToolTip('(no image opened)')
 
         self.logo=QLabel()
         max_size=QSize(250,250)
@@ -497,6 +505,7 @@ class AnnotatorJ(QWidget):
             displayedName=self.defFile[:min(maxLength-3,len(nameSplit[0]))]+'..'+nameSplit[1]
         
         self.lblCurrentFile.setText(' ('+str(self.curFileIdx+1)+'/'+str(fileListCount)+'): '+displayedName)
+        self.lblCurrentFile.setToolTip(self.defFile+'<br>')
 
         # MOVING FCN mods:
         #self.lblCurrentFile.addMouseListener
@@ -595,6 +604,16 @@ class AnnotatorJ(QWidget):
 
             # chkbx setting moved to its own fcn initChkBoxes
 
+
+        # reinit class mode
+        if self.classMode and (self.selectedAnnotationType=='bbox' or self.selectedAnnotationType=='instance'):
+            self.chckbxClass.setChecked(False)
+
+        # enable shortcut for class mode
+        roiLayer.bind_key('c',func=self.toggleClassMode,overwrite=True)
+        roiLayer.bind_key('a',func=self.toggleContAssistMode,overwrite=True)
+        roiLayer.bind_key('Shift-e',func=self.toggleEditMode,overwrite=True)
+        roiLayer.bind_key('o',func=self.showOptionsWidget,overwrite=True)
 
         # TODO: add missing settings
 
@@ -791,8 +810,14 @@ class AnnotatorJ(QWidget):
 
                 # select the "select shape" mode from the controls by default
                 #shapesLayer.mode = 'select'
-                # select the "add polygon" mode from the controls by default to enable freehand ROI drawing
-                shapesLayer.mode = 'add_polygon'
+                if not self.classMode and not self.editMode:
+                    if self.selectedAnnotationType=='instance':
+                        # select the "add polygon" mode from the controls by default to enable freehand ROI drawing
+                        shapesLayer.mode = 'add_polygon'
+                    elif self.selectedAnnotationType=='bbox':
+                        shapesLayer.mode = 'add_rectangle'
+                else:
+                    shapesLayer.mode='select'
 
                 self.addFreeROIdrawing(shapesLayer)
                 self.addKeyBindings(shapesLayer)
@@ -1836,6 +1861,8 @@ class AnnotatorJ(QWidget):
                 #labelLayer.bind_key('q',func=self.warnMissingCtrl)
                 labelLayer.bind_key('Escape',func=self.rejectEdit)
                 labelLayer.bind_key('Control-Delete',func=self.deleteEdit)
+
+                labelLayer.bind_key('Shift-e',func=self.toggleEditMode,overwrite=True)
 
             else:
                 print('Could not find the ROI associated with the selected point on the image.')
@@ -3389,6 +3416,7 @@ class AnnotatorJ(QWidget):
         else:
             shapesLayer2=Shapes(name='contourAssist',shape_type='polygon',edge_width=2*self.annotEdgeWidth,edge_color=curColour,face_color=[0,0,0,0])
             self.viewer.add_layer(shapesLayer2)
+            shapesLayer2.bind_key('a',func=self.toggleContAssistMode,overwrite=True)
             return shapesLayer2
 
 
@@ -3552,13 +3580,20 @@ class AnnotatorJ(QWidget):
 
             self.editMode=False
             print('Edit mode cleared')
-            # set the "add polygon" mode
-            shapesLayer.mode = 'add_polygon'
 
-            self.chckbxContourAssist.setEnabled(True)
-            self.chckbxContourAssist.setStyleSheet("color: white")
-            self.chckbxClass.setEnabled(True)
-            self.chckbxClass.setStyleSheet("color: white")
+            if self.selectedAnnotationType=='instance':
+                # set the "add polygon" mode
+                shapesLayer.mode = 'add_polygon'
+
+                self.chckbxContourAssist.setEnabled(True)
+                self.chckbxContourAssist.setStyleSheet("color: white")
+            if self.selectedAnnotationType=='instance' or self.selectedAnnotationType=='bbox':
+                self.chckbxClass.setEnabled(True)
+                self.chckbxClass.setStyleSheet("color: white")
+
+            if self.selectedAnnotationType=='bbox':
+                # set the "add polygon" mode
+                shapesLayer.mode = 'add_rectangle'
 
 
     def showCnt(self,state):
@@ -3684,15 +3719,16 @@ class AnnotatorJ(QWidget):
                 self.viewer.window.qt_viewer.layer_to_visual[shapesLayer].node._subvisuals[1].visible=False
                 self.viewer.window.qt_viewer.layer_to_visual[shapesLayer].node._subvisuals[2].visible=False
                 self.viewer.window.qt_viewer.layer_to_visual[shapesLayer].node._subvisuals[3].visible=False
-                shapesLayer.bind_key('Space',func=self.hold_to_pan_zoom)
+                shapesLayer.bind_key('Space',func=self.hold_to_pan_zoom,overwrite=True)
 
 
         else:
             self.classMode=False
             print('Class mode cleared')
 
-            self.chckbxContourAssist.setEnabled(True)
-            self.chckbxContourAssist.setStyleSheet("color: white")
+            if self.selectedAnnotationType=='instance':
+                self.chckbxContourAssist.setEnabled(True)
+                self.chckbxContourAssist.setStyleSheet("color: white")
             if self.classesFrame is not None:
                 self.classesFrame.closeClassesFrame()
 
@@ -4018,6 +4054,22 @@ class AnnotatorJ(QWidget):
             layer.refresh()
             #layer.selected_data = prev_selected
             #layer._set_highlight()
+
+
+    def toggleClassMode(self,layer):
+        self.chckbxClass.setChecked(not self.chckbxClass.isChecked())
+
+    def toggleContAssistMode(self,layer):
+        self.chckbxContourAssist.setChecked(not self.chckbxContourAssist.isChecked())
+
+    def toggleEditMode(self,layer):
+        self.chkEdit.setChecked(not self.chkEdit.isChecked())
+
+    def showOptionsWidget(self,layer):
+        if self.optionsFrame is None:
+            self.openOptionsFrame()
+        else:
+            self.optionsFrame.closeWidget()
 
 
     def openOptionsFrame(self):
