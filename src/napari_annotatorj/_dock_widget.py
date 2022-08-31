@@ -82,6 +82,9 @@ class AnnotatorJ(QWidget):
         self.enableMaskLoad=False
         self.autoMaskLoad=False
         self.maskFolderInited=False
+        self.maskFolderInitedPath=None
+
+        self.enableTextLoad=False
 
         self.inAssisting=False
         self.addAuto=False
@@ -803,9 +806,33 @@ class AnnotatorJ(QWidget):
                 pass
 
             # check if masks can be loaded (false by default)
+            loadedAutoRoi=False
+            loadedROIfolder=None
+            if self.enableMaskLoad or self.enableTextLoad:
+                # init mask folder selection either way
+                if self.maskFolderInited:
+                    # no need to open the dialog again
+                    loadedROIfolder=self.maskFolderInitedPath
+                else:
+                    # browse mask folder
+                    loadedROIfolder=QFileDialog.getExistingDirectory(self,"Select folder of exported annotation files",self.defDir,QFileDialog.ShowDirsOnly)
+                    if os.path.isdir(loadedROIfolder):
+                        print('Opened annotation file folder: {}'.format(loadedROIfolder))
+                    else:
+                        print('Failed to open annotation file folder')
+                        return
+
             if self.enableMaskLoad:
                 # TODO
-                pass
+
+                # moved to its own fcn
+                loadedAutoRoi=self.loadRoisFromMask(loadedROIfolder,loadedAutoRoi)
+
+            if self.enableTextLoad and not loadedAutoRoi:
+
+                # moved to its own fcn
+                self.loadRoisFromCoords(loadedROIfolder)
+
 
             else:
                 # normal way, import ROI.zip file
@@ -865,6 +892,8 @@ class AnnotatorJ(QWidget):
             # set class vars accordingly
             # TODO: set the vars
             self.startedClassifying=True
+
+        self.bindKeys(roiLayer)
 
 
     def loadROIs2(self):
@@ -1101,6 +1130,228 @@ class AnnotatorJ(QWidget):
 
         return shapesLayer
 
+
+    # function to import rois from a mask image
+    def importROIsFromMaskImage(self,mask,layerName='ROI'):
+        # TODO
+        pass
+
+
+    # function to import bbox rois from a coords text file
+    def importROIsFromCoordsText(self,textPath,layerName='ROI'):
+        # existence of the file is already checked at this point
+        delim=None
+        skipHeader=False # YOLO
+        roiData=[]
+        classes=[]
+        roiColours=[]
+        roiProps={'name':[],'class':[],'nameInt':[]}
+        li=0
+        success=False
+        if self.imgSize is None:
+            imageLayer=self.findImageLayer()
+            if imageLayer is not None:
+                self.imgSize=imageLayer.data.shape
+
+        with open(textPath) as coordFile:
+            for line in coordFile.readlines():
+                if delim is None:
+                    if line[0]=='x':
+                        # 1st character of "x,y,...", COCO format
+                        delim=','
+                        skipHeader=True
+                        if layerName=='ROI':
+                            roiColours=self.defColour
+                        elif layerName=='overlay':
+                            roiColours=self.overlayColour
+                    else:
+                        # no header, YOLO format
+                        delim=' '
+                        roiColours=[]
+                    if skipHeader:
+                        continue
+
+                data=line.split(delim)
+                if not skipHeader:
+                    # YOLO
+                    # [class x_center y_center w h]
+                    c=int(data[0])
+                    classes.append(c)
+                    # construct napari rectangle from it: [[y,x],[y+h,x+w]]
+                    if self.imgSize is None:
+                        print(f'Cannot compute coordinates from YOLO bounding box format when no image is opened')
+                        return False
+                    w=int(float(data[3])*self.imgSize[1])
+                    h=int(float(data[4])*self.imgSize[0])
+                    x=int(float(data[1])*self.imgSize[1])-int(float(w)/2)
+                    y=int(float(data[2])*self.imgSize[0])-int(float(h)/2)
+                    rect=[[y,x],[y+h,x+w]]
+
+                    if c>0:
+                        curColour=None
+                        if self.classColourLUT is None:
+                            self.classColourLUT={}
+                            self.classColourLUT.update({c:self.colours[c-1]})
+                        elif c not in self.classColourLUT:
+                            self.classColourLUT.update({c:self.colours[c-1]})
+                        curColour=self.classColourLUT[c]
+                        roiColours.append(curColour)
+                        roiProps['class'].append(c)
+
+                        # store class info for the Classes widget
+                        if self.listModelClasses is None:
+                            self.listModelClasses=[]
+                            self.selectedClassNameNumber=1
+                            self.classFrameColours=[]
+                        newName='Class_{:02d}'.format(c)
+                        if newName not in self.listModelClasses and newName not in self.classFrameNames:
+                            self.listModelClasses.append(newName)
+                            self.classFrameNames.append(newName)
+                            self.classFrameColours.append(c-1)
+                            
+                    else:
+                        if layerName=='ROI':
+                            roiColours.append(self.defColour)
+                        elif layerName=='overlay':
+                            roiColours.append(self.overlayColour)
+                        roiProps['class'].append(c)
+                else:
+                    # COCO
+                    # ['x','y','width','height']
+                    # construct napari rectangle from it: [[y,x],[y+h,x+w]]
+                    rect=[[int(data[1]),int(data[0])],[int(data[1])+int(data[3]),int(data[0])+int(data[2])]]
+                    roiProps['class'].append(0)
+
+                roiData.append(rect)
+
+                roiProps['name'].append('{:04d}'.format(li+1))
+                roiProps['nameInt'].append(int(li+1))
+                li+=1
+
+        if len(roiColours)==0:
+            if layerName=='ROI':
+                roiColours=[self.defColour]*len(roiData)
+            elif layerName=='overlay':
+                roiColours=[self.overlayColour]*len(roiData)
+            roiProps['class']=[0]*len(roiData)
+
+        # how to add the bboxes: shapes.add_rectangles([[y,x],[y+h,x+w]])
+
+        try:
+            # rename any existing ROI layers so that this one is the new default
+            self.renameROIlayers(layerName=layerName)
+
+            shapesLayer=self.findROIlayer(layerName=layerName)
+            if shapesLayer is not None:
+                shapesLayer.add_rectangles(roiData,edge_width=self.annotEdgeWidth,edge_color=roiColours,face_color=[0,0,0,0])
+            else:
+                print(f'Cannot find the ROI layer')
+                #roiProps={'name':[],'class':[],'nameInt':[]}
+                roiTextProps={
+                    'text': '{nameInt}: ({class})',
+                    'anchor': 'center',
+                    'size': 10,
+                    'color': 'black',
+                    'visible':False
+                }
+                shapesLayer=Shapes(data=numpy.array(roiData),shape_type='rectangle',name=layerName,edge_width=self.annotEdgeWidth,edge_color=roiColours,face_color=[0,0,0,0],properties=roiProps,text=roiTextProps)
+                self.viewer.add_layer(shapesLayer)# if layerName=='ROI' else self.viewer.layers.insert(len(self.viewer.layers)-2,shapesLayer)
+                setLayer=True if layerName=='ROI' else False
+                tmp=self.findROIlayer(layerName=layerName,setLayer=setLayer)
+                if tmp is None:
+                    print('None roi layer')
+                    success=False
+                else:
+                    print('existing roi layer')
+                    success=True
+                shapesLayer.mode = 'add_rectangle'
+                shapesLayer.refresh()
+                self.viewer.reset_view()
+
+            shapesLayer.text.refresh_text(shapesLayer.properties)
+        
+        except Exception as e:
+            print(e)
+            success=False
+        else:
+            success=True
+
+        return success
+
+
+    def loadRoisFromCoords(self,loadedROIfolder,layerName='ROI'):
+        # construct file name: [image name].tiff
+        loadedROIname=os.path.splitext(self.defFile)[-2]+'.txt'
+        # check if exists
+        if not os.path.isfile(os.path.join(loadedROIfolder,loadedROIname)):
+            loadedROIname=os.path.splitext(self.defFile)[-2]+'.csv'
+            if not os.path.isfile(os.path.join(loadedROIfolder,loadedROIname)):
+                # text file doesn't exist
+                print(f'Coordinates text file {loadedROIname} does not exist')
+                return
+
+        shapesLayer=self.findROIlayer(layerName=layerName)
+        if self.prevTool is not None:
+            shapesLayer.mode=self.prevTool
+
+        successfullyImportedROIs=self.importROIsFromCoordsText(os.path.join(loadedROIfolder,loadedROIname),layerName=layerName)
+        if not successfullyImportedROIs:
+            print(f'Failed to import ROIs from coordinates text file: {loadedROIname}')
+            return
+        else:
+            print(f'Imported ROIs from coordinates text file: {loadedROIname}')
+            self.maskFolderInited=True
+            self.maskFolderInitedPath=loadedROIfolder
+        
+        shapesLayer=self.findROIlayer(layerName=layerName)
+        if self.showCnt:
+            if shapesLayer is not None:
+                shapesLayer.visible=True
+                if self.prevTool is not None:
+                    shapesLayer.mode=self.prevTool
+                    self.prevTool=None
+        else:
+            if shapesLayer is not None:
+                self.prevTool=shapesLayer.mode
+                shapesLayer.visible=False
+
+
+    def loadRoisFromMask(self,loadedROIfolder,loadedAutoRoi,layerName='ROI'):
+        # construct file name: [image name].tiff
+        loadedROIname=os.path.splitext(self.defFile)[-2]+'.tiff'
+        # check if exists
+        if not os.path.isfile(os.path.join(loadedROIfolder,loadedROIname)):
+            # mask file doesn't exist
+            print(f'Mask image {loadedROIname} does not exist')
+            return
+
+        importedMask=skimage.io.imread(os.path.join(loadedROIfolder,loadedROIname))
+
+        successfullyImportedROIs=self.importROIsFromMaskImage(importedMask,layerName=layerName)
+        if not successfullyImportedROIs:
+            print(f'Failed to import ROIs from mask file: {loadedROIname}')
+            return
+        else:
+            print(f'Imported ROIs from mask file: {loadedROIname}')
+            self.maskFolderInited=True
+            self.maskFolderInitedPath=loadedROIfolder
+        
+        shapesLayer=self.findROIlayer(layerName=layerName)
+        if self.showCnt:
+            if shapesLayer is not None:
+                shapesLayer.visible=True
+                if self.prevTool is not None:
+                    shapesLayer.mode=self.prevTool
+                    self.prevTool=None
+        else:
+            if shapesLayer is not None:
+                self.prevTool=shapesLayer.mode
+                shapesLayer.visible=False
+
+        loadedAutoRoi=True
+        return loadedAutoRoi
+
+
     def initClassColourLUT(self,rois):
         # setup a colour lut
         # loop through all ROIs and assign colours by classes
@@ -1253,6 +1504,7 @@ class AnnotatorJ(QWidget):
                 'saveAnnotTimes':self.saveAnnotTimes,
                 'autoMaskLoad':self.autoMaskLoad,
                 'enableMaskLoad':self.enableMaskLoad,
+                'enableTextLoad':self.enableTextLoad,
                 'saveOutlines':self.saveOutlines,
                 'gpuSetting':self.gpuSetting
             }
@@ -1308,6 +1560,8 @@ class AnnotatorJ(QWidget):
             self.autoMaskLoad=params['autoMaskLoad']
         if 'enableMaskLoad' in params and isinstance(params['enableMaskLoad'],bool):
             self.enableMaskLoad=params['enableMaskLoad']
+        if 'enableTextLoad' in params and isinstance(params['enableTextLoad'],bool):
+            self.enableTextLoad=params['enableTextLoad']
         if 'saveOutlines' in params and isinstance(params['saveOutlines'],bool):
             self.saveOutlines=params['saveOutlines']
         if 'gpuSetting' in params:
@@ -2803,6 +3057,10 @@ class AnnotatorJ(QWidget):
                     # load the mask from the selected folder automatically
                     self.loadROIs()
 
+                if self.enableTextLoad and self.autoMaskLoad and self.maskFolderInited:
+                    # load the coordinates text file from the selected folder automatically
+                    self.loadROIs()
+
                 return
 
 
@@ -2841,6 +3099,10 @@ class AnnotatorJ(QWidget):
                 # check if auto mask load is enabled
                 if self.enableMaskLoad and self.autoMaskLoad and self.maskFolderInited:
                     # load the mask from the selected folder automatically
+                    self.loadROIs()
+
+                if self.enableTextLoad and self.autoMaskLoad and self.maskFolderInited:
+                    # load the coordinates text file from the selected folder automatically
                     self.loadROIs()
 
                 return
@@ -3842,9 +4104,30 @@ class AnnotatorJ(QWidget):
             pass
 
         # check if masks can be loaded (false by default)
+        loadedAutoRoi=False
+        loadedROIfolder=None
+        if self.enableMaskLoad or self.enableTextLoad:
+            # init mask folder selection either way
+            if self.maskFolderInited:
+                # no need to open the dialog again
+                loadedROIfolder=self.maskFolderInitedPath
+            else:
+                # browse mask folder
+                loadedROIfolder=QFileDialog.getExistingDirectory(self,"Select folder of exported annotation files",self.defDir,QFileDialog.ShowDirsOnly)
+                if os.path.isdir(loadedROIfolder):
+                    print('Opened annotation file folder: {}'.format(loadedROIfolder))
+                else:
+                    print('Failed to open annotation file folder')
+                    return
+
         if self.enableMaskLoad:
-            # TODO
-            pass
+            # moved to its own fcn
+            loadedAutoRoi=self.loadRoisFromMask(loadedROIfolder,loadedAutoRoi,layerName='ROI')
+
+        if self.enableTextLoad and not loadedAutoRoi:
+            # moved to its own fcn
+            self.loadRoisFromCoords(loadedROIfolder,layerName='overlay')
+
         else:
             # normal way, import ROI.zip file
             roiFileName,_=QFileDialog.getOpenFileName(
@@ -3868,14 +4151,23 @@ class AnnotatorJ(QWidget):
                 print('Loaded {} ROIs successfully on overlay'.format(len(rois)))
                 self.overlayAdded=True
 
-            roiLayer=self.findROIlayer(True)
+        roiLayer=self.findROIlayer(setLayer=True,layerName='ROI')
 
-            # select the "select shape" mode from the controls by default
-            #shapesLayer.mode = 'select'
-            # select the "add polygon" mode from the controls by default to enable freehand ROI drawing
-            roiLayer.mode = 'add_polygon'
+        # select the "select shape" mode from the controls by default
+        #shapesLayer.mode = 'select'
+        # select the "add polygon" mode from the controls by default to enable freehand ROI drawing
+        if self.selectedAnnotationType=='instance':
+            if roiLayer is not None:
+                roiLayer.mode = 'add_polygon'
+        elif self.selectedAnnotationType=='bbox':
+            if roiLayer is not None:
+                roiLayer.mode='add_rectangle'
+        elif self.selectedAnnotationType=='semantic':
+            labelLayer=self.findLabelsLayerName()
+            if labelLayer is not None:
+                labelLayer.mode='paint'
 
-            self.viewer.reset_view()
+        self.viewer.reset_view()
 
         self.showOvl=True
         self.chkShowOverlay.setChecked(True)
