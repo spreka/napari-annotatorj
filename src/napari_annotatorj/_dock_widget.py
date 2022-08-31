@@ -83,6 +83,7 @@ class AnnotatorJ(QWidget):
         self.autoMaskLoad=False
         self.maskFolderInited=False
         self.maskFolderInitedPath=None
+        self.loadOrOverlay='load'
 
         self.enableTextLoad=False
 
@@ -828,7 +829,7 @@ class AnnotatorJ(QWidget):
                 # moved to its own fcn
                 loadedAutoRoi=self.loadRoisFromMask(loadedROIfolder,loadedAutoRoi)
 
-            if self.enableTextLoad and not loadedAutoRoi:
+            elif self.enableTextLoad and not loadedAutoRoi:
 
                 # moved to its own fcn
                 self.loadRoisFromCoords(loadedROIfolder)
@@ -1134,7 +1135,97 @@ class AnnotatorJ(QWidget):
     # function to import rois from a mask image
     def importROIsFromMaskImage(self,mask,layerName='ROI'):
         # TODO
-        pass
+
+        success=False
+        initCount=self.roiCount
+
+        if mask is None:
+            # failed image read, abort
+            return success
+
+        maskdimensions=mask.shape
+        maskwidth=maskdimensions[0]
+        maskheight=maskdimensions[1]
+
+        # get max value to see the number of labels
+        maxValue=mask.max()
+        if maxValue==0:
+            print(f'Empty mask, cannot import ROIs')
+            return success
+
+        maskHistogram=numpy.unique(mask)
+        shapes=[]
+        roiProps={'name':[],'class':[],'nameInt':[]}
+        roiTextProps={
+            'text': '{nameInt}: ({class})',
+            'anchor': 'center',
+            'size': 10,
+            'color': 'black',
+            'visible':False
+        }
+        roiColours=[]
+
+        # skip 0-values in histogram (background)
+        maskHistogram=list(maskHistogram)
+        maskHistogram.pop(0)
+        for k in maskHistogram:
+            foundValues=False
+
+            # threshold the mask to get an ROI
+            curMask=numpy.where(mask==k,1,0)
+            contour,hierarchy=cv2.findContours(curMask.astype(numpy.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+            if contour:
+                # not empty
+                shape=numpy.array(numpy.fliplr(numpy.squeeze(contour)))
+                shapes.append(shape)
+                if layerName=='ROI':
+                    roiColours.append(self.defColour)
+                elif layerName=='overlay':
+                    roiColours.append(self.overlayColour)
+                roiProps['class'].append(0)
+                # prefix 0-s to the name
+                roiProps['name'].append('{:04d}'.format(k))
+                roiProps['nameInt'].append(int(k))
+
+            else:
+                print(f' >>>> failed to create ROI from mask #{k}')
+
+        roiLayer=self.findROIlayer(layerName=layerName)
+        if roiLayer is not None:
+            roiLayer.add_polygons(shapes,edge_width=self.annotEdgeWidth,edge_color=roiColours,face_color=[0,0,0,0])
+            roiLayer.properties=roiProps
+
+        else:
+            print(f'Cannot find the ROI layer')
+            roiLayer=Shapes(data=shapes,shape_type='polygon',name=layerName,edge_width=self.annotEdgeWidth,edge_color=roiColours,face_color=[0,0,0,0],properties=roiProps,text=roiTextProps)
+            self.viewer.add_layer(roiLayer)
+
+            setLayer=True if layerName=='ROI' else False
+            tmp=self.findROIlayer(layerName=layerName,setLayer=setLayer)
+            if tmp is None:
+                print('None roi layer')
+                success=False
+            else:
+                print('existing roi layer')
+                success=True
+            roiLayer.mode = 'add_polygon'
+            roiLayer.refresh()
+            self.viewer.reset_view()
+
+        roiLayer.refresh_text()
+
+        success=True
+
+        '''
+        if roiLayer.nshapes<=initCount:
+            success=False
+        else:
+            success=True
+            self.roiCount=roiLayer.nshapes
+        '''
+
+        return success
 
 
     # function to import bbox rois from a coords text file
@@ -1505,6 +1596,7 @@ class AnnotatorJ(QWidget):
                 'autoMaskLoad':self.autoMaskLoad,
                 'enableMaskLoad':self.enableMaskLoad,
                 'enableTextLoad':self.enableTextLoad,
+                'loadOrOverlay':self.loadOrOverlay,
                 'saveOutlines':self.saveOutlines,
                 'gpuSetting':self.gpuSetting
             }
@@ -1517,6 +1609,7 @@ class AnnotatorJ(QWidget):
     def setParams(self,params):
         if 'defaultAnnotType' in params:
             validTypes=['instance','bbox','semantic']
+            loadOrOverlayVals=['load','overlay']
             if params['defaultAnnotType'] in validTypes:
                 self.selectedAnnotationType=params['defaultAnnotType']
             else:
@@ -1562,6 +1655,13 @@ class AnnotatorJ(QWidget):
             self.enableMaskLoad=params['enableMaskLoad']
         if 'enableTextLoad' in params and isinstance(params['enableTextLoad'],bool):
             self.enableTextLoad=params['enableTextLoad']
+        if 'loadOrOverlay' in params:
+            if params['loadOrOverlay'] in loadOrOverlayVals:
+                self.loadOrOverlay=params['loadOrOverlay']
+            else:
+                # set to default
+                self.loadOrOverlay='load'
+
         if 'saveOutlines' in params and isinstance(params['saveOutlines'],bool):
             self.saveOutlines=params['saveOutlines']
         if 'gpuSetting' in params:
@@ -3055,11 +3155,17 @@ class AnnotatorJ(QWidget):
                 # check if auto mask load is enabled
                 if self.enableMaskLoad and self.autoMaskLoad and self.maskFolderInited:
                     # load the mask from the selected folder automatically
-                    self.loadROIs()
+                    if self.loadOrOverlay=='load':
+                        self.loadROIs()
+                    elif self.loadOrOverlay=='overlay':
+                        self.setOverlay()
 
-                if self.enableTextLoad and self.autoMaskLoad and self.maskFolderInited:
+                elif self.enableTextLoad and self.autoMaskLoad and self.maskFolderInited:
                     # load the coordinates text file from the selected folder automatically
-                    self.loadROIs()
+                    if self.loadOrOverlay=='load':
+                        self.loadROIs()
+                    elif self.loadOrOverlay=='overlay':
+                        self.setOverlay()
 
                 return
 
@@ -3099,11 +3205,17 @@ class AnnotatorJ(QWidget):
                 # check if auto mask load is enabled
                 if self.enableMaskLoad and self.autoMaskLoad and self.maskFolderInited:
                     # load the mask from the selected folder automatically
-                    self.loadROIs()
+                    if self.loadOrOverlay=='load':
+                        self.loadROIs()
+                    elif self.loadOrOverlay=='overlay':
+                        self.setOverlay()
 
-                if self.enableTextLoad and self.autoMaskLoad and self.maskFolderInited:
+                elif self.enableTextLoad and self.autoMaskLoad and self.maskFolderInited:
                     # load the coordinates text file from the selected folder automatically
-                    self.loadROIs()
+                    if self.loadOrOverlay=='load':
+                        self.loadROIs()
+                    elif self.loadOrOverlay=='overlay':
+                        self.setOverlay()
 
                 return
 
@@ -4122,9 +4234,9 @@ class AnnotatorJ(QWidget):
 
         if self.enableMaskLoad:
             # moved to its own fcn
-            loadedAutoRoi=self.loadRoisFromMask(loadedROIfolder,loadedAutoRoi,layerName='ROI')
+            loadedAutoRoi=self.loadRoisFromMask(loadedROIfolder,loadedAutoRoi,layerName='overlay')
 
-        if self.enableTextLoad and not loadedAutoRoi:
+        elif self.enableTextLoad and not loadedAutoRoi:
             # moved to its own fcn
             self.loadRoisFromCoords(loadedROIfolder,layerName='overlay')
 
