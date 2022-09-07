@@ -6,7 +6,7 @@ see: https://napari.org/docs/dev/plugins/hook_specifications.html
 
 Replace code below according to your needs.
 """
-from qtpy.QtWidgets import QWidget, QHBoxLayout,QVBoxLayout, QPushButton, QCheckBox,QLabel,QMessageBox,QFileDialog,QDialog,QComboBox,QListWidget,QAbstractItemView,QLineEdit,QMenu,QRadioButton
+from qtpy.QtWidgets import QWidget, QHBoxLayout,QVBoxLayout, QPushButton, QCheckBox,QLabel,QMessageBox,QFileDialog,QDialog,QComboBox,QListWidget,QAbstractItemView,QLineEdit,QMenu,QRadioButton,QSlider
 from magicgui import magic_factory
 
 import os
@@ -1255,6 +1255,11 @@ class AnnotatorJ(QWidget):
                             roiColours=self.defColour
                         elif layerName=='overlay':
                             roiColours=self.overlayColour
+                    elif line[0]=='c':
+                        # 1st character of "class x y ...", YOLO format but with header
+                        delim=' '
+                        roiColours=[]
+                        continue
                     else:
                         # no header, YOLO format
                         delim=' '
@@ -2080,6 +2085,7 @@ class AnnotatorJ(QWidget):
             coords=[]
             coords.append(curpos)
             started=False
+            backup2ndCoords=None
             # on move
             while event.type == 'mouse_move':
                 dragged = True
@@ -2105,16 +2111,27 @@ class AnnotatorJ(QWidget):
                         newcoords[0][1]=min(max(newcoords[0][1],0),self.imgSize[1]-1)
                         newcoords[1][0]=min(max(newcoords[1][0],0),self.imgSize[0]-1)
                         newcoords[1][1]=min(max(newcoords[1][1],0),self.imgSize[1]-1)
+                        # workaround for saving the 2nd vertex coords as it  gets overwritten
+                        backup2ndCoords=newcoords[1]
+                    elif newcoords[1]!=backup2ndCoords:
+                        newcoords[1]=backup2ndCoords
                     
                     newcoords.append(coords)
-                    layer._data_view.edit(layer.nshapes-1, newcoords)
+                    layer._data_view.edit(layer.nshapes-1, numpy.array(newcoords))
                     layer.refresh()
                 yield
             # on release
             if dragged:
                 # drag ended
+                # workaround for missing _moving_value on layer after polygon mode in class mode
+                if layer._moving_value==(None,None):
+                    layer._moving_value=(layer.nshapes-1,None)
                 # mimic an 'esc' key press to quit the basic add_polygon method
-                key_bindings.finish_drawing_shape(layer)
+                try:
+                    key_bindings.finish_drawing_shape(layer)
+                except Exception as e:
+                    print(e)
+                    warnings.warn('Failed to create roi, please try again')
                 # remove the duplicated shape
                 if not self.contAssist and not self.inAssisting:
                     try:
@@ -5380,6 +5397,7 @@ class ColourSelector(QWidget):
                     print('Failed to add widget Colours')
 
 
+    @classmethod
     def addColours(self,comboBox):
         comboBox.addItem('red')
         comboBox.addItem('green')
@@ -7002,6 +7020,134 @@ class OptionsFrame(QWidget):
         self.annotTypeBox.setCurrentText(self.annotatorjObj.selectedAnnotationType)
         self.annotTypeBox.currentIndexChanged.connect(self.annotTypeChanged)
 
+        self.annotTypeRemLabel=QLabel('remember annotation type: ')
+        self.annotTypeRemLabel.setToolTip('Remember the currently set<br>annotation type upon<br>next startup')
+        self.annotTypeRemChkBx=QCheckBox()
+        self.annotTypeRemChkBx.setChecked(self.annotatorjObj.rememberAnnotType)
+        self.annotTypeRemChkBx.stateChanged.connect(self.setRememberAnnotType)
+
+        self.annotColourLabel=QLabel('annotation colour: ')
+        self.annotColourLabel.setToolTip('Set default annotation colour')
+        self.annotColourBox=QComboBox()
+        ColourSelector.addColours(self.annotColourBox)
+        self.overlayColourLabel=QLabel('overlay colour: ')
+        self.overlayColourLabel.setToolTip('Set default overlay colour')
+        self.overlayColourBox=QComboBox()
+        ColourSelector.addColours(self.overlayColourBox)
+        self.annotColourBox.setCurrentText(self.annotatorjObj.defColour)
+        self.overlayColourBox.setCurrentText(self.annotatorjObj.overlayColour)
+        self.annotColourBox.currentIndexChanged.connect(lambda: print(f'Set annotation colour: {self.annotColourBox.currentText()}'))
+        self.overlayColourBox.currentIndexChanged.connect(lambda: print(f'Set overlay colour: {self.overlayColourBox.currentText()}'))
+
+        self.classesSaveFolderNamesLabel=QLabel('classes: ')
+        self.classesSaveFolderNamesLabel.setToolTip('Folder names to save annotations')
+        self.classesSaveFolderNamesList=QListWidget()
+        for idx,c in enumerate(self.annotatorjObj.propsClassString):
+            self.classesSaveFolderNamesList.addItem(c)
+            # make the item editable
+            item=self.classesSaveFolderNamesList.item(idx)
+            item.setFlags(item.flags() | Qt.ItemIsEditable)
+
+        self.classesSaveFolderNamesList.currentItemChanged.connect(self.classSaveListSelectionChanged)
+
+        self.distanceThreshLabel=QLabel('Max distance: ')
+        self.distanceThreshLabel.setToolTip('Max distance in pixels contour<br>correction can span from the<br>initial contour you create')
+        self.distanceThreshSlider=QSlider(Qt.Orientation.Horizontal)
+        self.distanceThreshSlider.setRange(0, 1)
+        self.distanceThreshSlider.setPageStep(0.01)
+        self.distanceThreshEl=QLineEdit(str(self.annotatorjObj.distanceThreshVal))
+        self.distanceThreshSlider.valueChanged.connect(self.distanceThreshChanged) # def fcn(self,val) <-- val is the slider value
+        self.distanceThreshEl.editingFinished.connect(self.distanceThreshChangedText) # sets slider.setValue(newVal)
+        self.pixelLabel_1=QLabel('(pixels)')
+        self.pixelLabel_2=QLabel('(pixels)')
+        self.pixelLabel_3=QLabel('(pixels)')
+
+        self.intThreshLabel=QLabel('Threshold (gray): ')
+        self.intThreshLabel.setToolTip('Intensity threshold value<br>in the range [0,1] in which<br>contour correction can happen')
+        self.intThreshSlider=QSlider(Qt.Orientation.Horizontal)
+        self.intThreshSlider.setRange(0, 1)
+        self.intThreshSlider.setPageStep(0.01)
+        self.intThreshEl=QLineEdit(str(self.annotatorjObj.intensityThreshVal))
+        self.intThreshSlider.valueChanged.connect(self.intThreshChanged) # def fcn(self,val) <-- val is the slider value
+        self.intThreshEl.editingFinished.connect(self.intThreshChangedText) # sets slider.setValue(newVal)
+
+        self.intThreshLabelR=QLabel('Threshold (RGB): ')
+        self.intThreshLabelR.setToolTip('Intensity threshold value<br>for RGB (colour) images in<br>the range [0,1] in which contour<br>correction can happen.<br>You can set (R,G,B) values in<br>the 3 text boxes on the right')
+        self.intThreshSliderR=QSlider(Qt.Orientation.Horizontal)
+        self.intThreshSliderR.setRange(0, 1)
+        self.intThreshSliderR.setPageStep(0.01)
+        self.intThreshElR=QLineEdit(str(self.annotatorjObj.intensityThreshValR))
+        self.intThreshElR.setToolTip('Red intensity threshold value<br>for RGB (colour) images in the<br>range [0,1]')
+        self.intThreshSliderR.valueChanged.connect(self.intThreshRChanged) # def fcn(self,val) <-- val is the slider value
+        self.intThreshElR.editingFinished.connect(self.intThreshRChangedText) # sets slider.setValue(newVal)
+        self.intThreshSliderG=QSlider(Qt.Orientation.Horizontal)
+        self.intThreshSliderG.setRange(0, 1)
+        self.intThreshSliderG.setPageStep(0.01)
+        self.intThreshElG=QLineEdit(str(self.annotatorjObj.intensityThreshValG))
+        self.intThreshElG.setToolTip('Green intensity threshold value<br>for RGB (colour) images in the<br>range [0,1]')
+        self.intThreshSliderG.valueChanged.connect(self.intThreshGChanged) # def fcn(self,val) <-- val is the slider value
+        self.intThreshElG.editingFinished.connect(self.intThreshGChangedText) # sets slider.setValue(newVal)
+        self.intThreshSliderB=QSlider(Qt.Orientation.Horizontal)
+        self.intThreshSliderB.setRange(0, 1)
+        self.intThreshSliderB.setPageStep(0.01)
+        self.intThreshElB=QLineEdit(str(self.annotatorjObj.intensityThreshValB))
+        self.intThreshElB.setToolTip('Blue intensity threshold value<br>for RGB (colour) images in the<br>range [0,1]')
+        self.intThreshSliderB.valueChanged.connect(self.intThreshBChanged) # def fcn(self,val) <-- val is the slider value
+        self.intThreshElB.editingFinished.connect(self.intThreshBChangedText) # sets slider.setValue(newVal)
+
+        self.range01_1=QLabel('[0-1]')
+        self.range01_2=QLabel('[0-1]')
+        self.range01_3=QLabel('[0-1]')
+        self.range01_4=QLabel('[0-1]')
+
+        self.corrMethodLabel=QLabel('Method: ')
+        self.corrMethodLabel.setToolTip('Correction method')
+        self.unetLabel=QLabel('U-Net')
+        self.unetLabel.setToolTip('U-Net deep learning method')
+        self.classicLabel=QLabel('Classic')
+        self.classicLabel.setToolTip('Classic image processing<br>method (region growing)')
+
+        self.methodSlider=QSlider(Qt.Orientation.Horizontal)
+        self.methodSlider.setRange(0, 1)
+        self.methodSlider.setPageStep(1)
+        self.methodSlider.valueChanged.connect(self.corrMethodChanged)
+
+        self.modelFullLabel=QLabel('full file: ')
+        self.modelFullLabel.setToolTip('Name of the combined weights + graph model file (e.g. model_real.hdf5)')
+        self.modelFullEl=QLineEdit(self.annotatorjObj.modelFullFile)
+        self.modelFullEl.editingFinished.connect(self.setModelFullFile)
+
+        self.modelJsonLabel=QLabel('.json file: ')
+        self.modelJsonLabel.setToolTip('Name of the model graph .json file <b>without</b> .json (e.g. model_real)')
+        self.modelJsonEl=QLineEdit(self.annotatorjObj.modelJsonFile)
+        self.modelJsonEl.editingFinished.connect(self.setModelJsonFile)
+
+        self.modelFolderLabel=QLabel('folder: ')
+        self.modelFolderLabel.setToolTip('Path of the model folder (e.g. c:/Users/user/.napari_annotatorj/models). On Windows mind the "/" slash character instead of "\\".')
+        self.modelFolderEl=QLineEdit(self.annotatorjObj.modelFolder)
+        self.modelFolderEl.editingFinished.connect(self.setModelFolder)
+
+        self.modelWeightsLabel=QLabel('weights file: ')
+        self.modelWeightsLabel.setToolTip('Name of the model weights file <b>with</b> extension (e.g. model_real_weights.h5)')
+        self.modelWeightsEl=QLineEdit(self.annotatorjObj.modelWeightsFile)
+        self.modelWeightsEl.editingFinished.connect(self.setModelWeightsFile)
+
+        self.corrBrushLabel=QLabel('Brush size: ')
+        self.corrBrushLabel.setToolTip('Correction brush size<br>(diameter) in pixels')
+        self.corrBrushEl=QLineEdit(str(self.annotatorjObj.correctionBrushSize))
+        self.corrBrushEl.editingFinished.connect(self.setCorrBrushSize)
+
+        self.semBrushLabel=QLabel('Brush size: ')
+        self.semBrushLabel.setToolTip('')
+        self.semBrushEl=QLineEdit(str(self.annotatorjObj.semanticBrushSize))
+        self.semBrushEl.editingFinished.connect(self.setSemBrushSize)
+
+        self.saveAnnotTimesLabel=QLabel('save annot times: ')
+        self.saveAnnotTimesLabel.setToolTip('Save annotation times to .csv file per object')
+        self.saveAnnotTimesChkBx=QCheckBox()
+        self.saveAnnotTimesChkBx.setChecked(self.annotatorjObj.saveAnnotTimes)
+        self.saveAnnotTimesChkBx.stateChanged.connect(self.setSaveAnnotTimes)
+
         self.optionsOkBtn=QPushButton('Ok')
         self.optionsOkBtn.setToolTip('Apply changes')
         self.optionsOkBtn.clicked.connect(self.applyOptions)
@@ -7189,6 +7335,116 @@ class OptionsFrame(QWidget):
                 except Exception as e:
                     print(e)
                     print('Failed to remove widget named Options')
+
+
+    def setRememberAnnotType(self):
+        # TODO
+        pass
+
+
+    def classSaveListSelectionChanged(self):
+        # TODO
+        pass
+
+
+    def distanceThreshChanged(self,val):
+        # TODO
+        pass
+
+
+    def distanceThreshChangedText(self):
+        # TODO
+        newVal=self.distanceThreshEl.text()
+        self.distanceThreshSlider.setValue(newVal)
+        pass
+
+
+    def intThreshChanged(self,val):
+        # TODO
+        pass
+
+
+    def intThreshChangedText(self):
+        # TODO
+        newVal=self.intThreshEl.text()
+        self.intThreshSlider.setValue(newVal)
+        pass
+
+
+    def intThreshRChanged(self,val):
+        # TODO
+        pass
+
+
+    def intThreshRChangedText(self):
+        # TODO
+        newVal=self.intThreshElR.text()
+        self.intThreshSliderR.setValue(newVal)
+        pass
+
+
+    def intThreshGChanged(self,val):
+        # TODO
+        pass
+
+
+    def intThreshGChangedText(self):
+        # TODO
+        newVal=self.intThreshElG.text()
+        self.intThreshSliderG.setValue(newVal)
+        pass
+
+
+    def intThreshBChanged(self,val):
+        # TODO
+        pass
+
+
+    def intThreshBChangedText(self):
+        # TODO
+        newVal=self.intThreshElB.text()
+        self.intThreshSliderB.setValue(newVal)
+        pass
+
+
+    def corrMethodChanged(self,val):
+        # TODO
+        pass
+
+
+    def setModelFullFile(self):
+        # TODO
+        pass
+
+
+    def setModelJsonFile(self):
+        # TODO
+        pass
+
+
+    def setModelFolder(self):
+        # TODO
+        pass
+
+
+    def setModelWeightsFile(self):
+        # TODO
+        pass
+
+
+    def setCorrBrushSize(self):
+        # TODO
+        pass
+
+
+    def setSemBrushSize(self):
+        # TODO
+        pass
+
+
+    def setSaveAnnotTimes(self):
+        # TODO
+        pass
 
 
 # -------------------------------------

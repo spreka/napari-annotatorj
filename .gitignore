@@ -78,6 +78,9 @@ target/
 # written by setuptools_scm
 **/_version.py
 
+# vs code
+.vscode/
+
 # testing
 demo/masks
 demo/masks_prev
