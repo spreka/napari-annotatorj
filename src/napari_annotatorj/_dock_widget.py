@@ -6,7 +6,8 @@ see: https://napari.org/docs/dev/plugins/hook_specifications.html
 
 Replace code below according to your needs.
 """
-from qtpy.QtWidgets import QWidget, QHBoxLayout,QVBoxLayout, QPushButton, QCheckBox,QLabel,QMessageBox,QFileDialog,QDialog,QComboBox,QListWidget,QAbstractItemView,QLineEdit,QMenu,QRadioButton,QSlider
+from time import sleep
+from qtpy.QtWidgets import QWidget, QHBoxLayout,QVBoxLayout, QPushButton, QCheckBox,QLabel,QMessageBox,QFileDialog,QDialog,QComboBox,QListWidget,QAbstractItemView,QLineEdit,QMenu,QRadioButton,QSlider,QFrame,QScrollArea,QButtonGroup
 from magicgui import magic_factory
 
 import os
@@ -1581,7 +1582,7 @@ class AnnotatorJ(QWidget):
         else:
             params={
                 'defaultAnnotType': self.selectedAnnotationType,
-                'rememberAnnotTyperememberAnnotType': self.rememberAnnotType,
+                'rememberAnnotType': self.rememberAnnotType,
                 'defColour':self.defColour,
                 'overlayColor':self.overlayColour,
                 'classes':self.propsClassString,
@@ -1620,8 +1621,8 @@ class AnnotatorJ(QWidget):
             else:
                 # set to default
                 self.selectedAnnotationType='instance'
-        if 'rememberAnnotTyperememberAnnotType' in params and isinstance(params['rememberAnnotTyperememberAnnotType'],bool):
-            self.rememberAnnotType=params['rememberAnnotTyperememberAnnotType']
+        if 'rememberAnnotType' in params and isinstance(params['rememberAnnotType'],bool):
+            self.rememberAnnotType=params['rememberAnnotType']
         if 'defColour' in params:
             self.defColour=params['defColour']
         if 'overlayColor' in params:
@@ -7003,7 +7004,7 @@ class OptionsFrame(QWidget):
         self.titleLabel=QLabel('Configurations are saved and loaded on plugin startup. When applying changes requires the restart of napari, a message will be shown.')
         self.titleLabel.setWordWrap(True)
 
-        self.annotTypeLabel=QLabel('annotation type: ')
+        self.annotTypeLabel=QLabel('Annotation type:')
         self.annotTypeLabel.setToolTip('Select annotation type: instance for freehand drawing, bounding box ("bbox") for rectangles, semantic for painting with a brush (labels)')
         self.annotTypeBox=QComboBox()
         self.annotTypeBox.setToolTip('Select annotation type: instance for freehand drawing, bounding box ("bbox") for rectangles, semantic for painting with a brush (labels)')
@@ -7020,26 +7021,19 @@ class OptionsFrame(QWidget):
         self.annotTypeBox.setCurrentText(self.annotatorjObj.selectedAnnotationType)
         self.annotTypeBox.currentIndexChanged.connect(self.annotTypeChanged)
 
-        self.annotTypeRemLabel=QLabel('remember annotation type: ')
-        self.annotTypeRemLabel.setToolTip('Remember the currently set<br>annotation type upon<br>next startup')
-        self.annotTypeRemChkBx=QCheckBox()
+        self.annotTypeRemChkBx=QCheckBox('Remember annotation type')
+        self.annotTypeRemChkBx.setToolTip('Remember the currently set<br>annotation type upon<br>next startup')
         self.annotTypeRemChkBx.setChecked(self.annotatorjObj.rememberAnnotType)
         self.annotTypeRemChkBx.stateChanged.connect(self.setRememberAnnotType)
 
-        self.annotColourLabel=QLabel('annotation colour: ')
-        self.annotColourLabel.setToolTip('Set default annotation colour')
-        self.annotColourBox=QComboBox()
-        ColourSelector.addColours(self.annotColourBox)
-        self.overlayColourLabel=QLabel('overlay colour: ')
-        self.overlayColourLabel.setToolTip('Set default overlay colour')
-        self.overlayColourBox=QComboBox()
-        ColourSelector.addColours(self.overlayColourBox)
-        self.annotColourBox.setCurrentText(self.annotatorjObj.defColour)
-        self.overlayColourBox.setCurrentText(self.annotatorjObj.overlayColour)
-        self.annotColourBox.currentIndexChanged.connect(lambda: print(f'Set annotation colour: {self.annotColourBox.currentText()}'))
-        self.overlayColourBox.currentIndexChanged.connect(lambda: print(f'Set overlay colour: {self.overlayColourBox.currentText()}'))
+        # colour settings
+        # invoke colours widget instead
+        self.colourLabel=QLabel('Colours:')
+        self.colourLabel.setToolTip('Set annotation and overlay colours')
+        self.colourSettingBtn=QPushButton('Set ...')
+        self.colourSettingBtn.clicked.connect(self.popColourWidget)
 
-        self.classesSaveFolderNamesLabel=QLabel('classes: ')
+        self.classesSaveFolderNamesLabel=QLabel('Classes:')
         self.classesSaveFolderNamesLabel.setToolTip('Folder names to save annotations')
         self.classesSaveFolderNamesList=QListWidget()
         for idx,c in enumerate(self.annotatorjObj.propsClassString):
@@ -7048,105 +7042,209 @@ class OptionsFrame(QWidget):
             item=self.classesSaveFolderNamesList.item(idx)
             item.setFlags(item.flags() | Qt.ItemIsEditable)
 
+        # add dummy empty element for extending the list
+        self.classesSaveFolderNamesList.addItem('')
+        item=self.classesSaveFolderNamesList.item(self.classesSaveFolderNamesList.count()-1)
+        item.setFlags(item.flags() | Qt.ItemIsEditable)
+
+        #self.classesSaveFolderNamesList.currentTextChanged.connect(self.classSaveListItemChanged)
+        self.classesSaveFolderNamesList.itemChanged.connect(self.classSaveListItemChanged)
         self.classesSaveFolderNamesList.currentItemChanged.connect(self.classSaveListSelectionChanged)
 
-        self.distanceThreshLabel=QLabel('Max distance: ')
+        self.distanceThreshLabel=QLabel('Max distance:')
         self.distanceThreshLabel.setToolTip('Max distance in pixels contour<br>correction can span from the<br>initial contour you create')
+        self.distanceThreshLabel.setIndent(20)
         self.distanceThreshSlider=QSlider(Qt.Orientation.Horizontal)
-        self.distanceThreshSlider.setRange(0, 1)
-        self.distanceThreshSlider.setPageStep(0.01)
+        self.distanceThreshSlider.setRange(0, 500)
+        self.distanceThreshSlider.setPageStep(1)
         self.distanceThreshEl=QLineEdit(str(self.annotatorjObj.distanceThreshVal))
+        self.distanceThreshSlider.setValue(self.annotatorjObj.distanceThreshVal)
         self.distanceThreshSlider.valueChanged.connect(self.distanceThreshChanged) # def fcn(self,val) <-- val is the slider value
         self.distanceThreshEl.editingFinished.connect(self.distanceThreshChangedText) # sets slider.setValue(newVal)
+        self.distanceThreshEl.setStyleSheet(f'background-color: rgba(0, 0, 0, 0); max-width: {int(self.annotatorjObj.bsize2/2)};')
         self.pixelLabel_1=QLabel('(pixels)')
         self.pixelLabel_2=QLabel('(pixels)')
         self.pixelLabel_3=QLabel('(pixels)')
 
-        self.intThreshLabel=QLabel('Threshold (gray): ')
+        self.intThreshLabelMain=QLabel('Threshold')
+        self.intThreshLabelMain.setToolTip('Contour correction intensity threshold values')
+        self.intThreshLabelMain.setIndent(20)
+
+        self.intThreshLabel=QLabel('gray:')
         self.intThreshLabel.setToolTip('Intensity threshold value<br>in the range [0,1] in which<br>contour correction can happen')
+        self.intThreshLabel.setIndent(40)
         self.intThreshSlider=QSlider(Qt.Orientation.Horizontal)
         self.intThreshSlider.setRange(0, 1)
         self.intThreshSlider.setPageStep(0.01)
+        self.intThreshSlider.setValue(self.annotatorjObj.intensityThreshVal)
         self.intThreshEl=QLineEdit(str(self.annotatorjObj.intensityThreshVal))
         self.intThreshSlider.valueChanged.connect(self.intThreshChanged) # def fcn(self,val) <-- val is the slider value
         self.intThreshEl.editingFinished.connect(self.intThreshChangedText) # sets slider.setValue(newVal)
+        self.intThreshEl.setStyleSheet(f'background-color: rgba(0, 0, 0, 0); max-width: {int(self.annotatorjObj.bsize2/2)};')
 
-        self.intThreshLabelR=QLabel('Threshold (RGB): ')
+        self.intThreshLabelR=QLabel('RGB:')
         self.intThreshLabelR.setToolTip('Intensity threshold value<br>for RGB (colour) images in<br>the range [0,1] in which contour<br>correction can happen.<br>You can set (R,G,B) values in<br>the 3 text boxes on the right')
+        self.intThreshLabelR.setIndent(40)
         self.intThreshSliderR=QSlider(Qt.Orientation.Horizontal)
         self.intThreshSliderR.setRange(0, 1)
         self.intThreshSliderR.setPageStep(0.01)
+        self.intThreshSliderR.setValue(self.annotatorjObj.intensityThreshValR)
         self.intThreshElR=QLineEdit(str(self.annotatorjObj.intensityThreshValR))
         self.intThreshElR.setToolTip('Red intensity threshold value<br>for RGB (colour) images in the<br>range [0,1]')
         self.intThreshSliderR.valueChanged.connect(self.intThreshRChanged) # def fcn(self,val) <-- val is the slider value
         self.intThreshElR.editingFinished.connect(self.intThreshRChangedText) # sets slider.setValue(newVal)
+        self.intThreshElR.setStyleSheet(f'background-color: rgba(0, 0, 0, 0); max-width: {int(self.annotatorjObj.bsize2/3)};')
         self.intThreshSliderG=QSlider(Qt.Orientation.Horizontal)
         self.intThreshSliderG.setRange(0, 1)
         self.intThreshSliderG.setPageStep(0.01)
+        self.intThreshSliderG.setValue(self.annotatorjObj.intensityThreshValG)
         self.intThreshElG=QLineEdit(str(self.annotatorjObj.intensityThreshValG))
         self.intThreshElG.setToolTip('Green intensity threshold value<br>for RGB (colour) images in the<br>range [0,1]')
         self.intThreshSliderG.valueChanged.connect(self.intThreshGChanged) # def fcn(self,val) <-- val is the slider value
         self.intThreshElG.editingFinished.connect(self.intThreshGChangedText) # sets slider.setValue(newVal)
+        self.intThreshElG.setStyleSheet(f'background-color: rgba(0, 0, 0, 0); max-width: {int(self.annotatorjObj.bsize2/3)};')
         self.intThreshSliderB=QSlider(Qt.Orientation.Horizontal)
         self.intThreshSliderB.setRange(0, 1)
         self.intThreshSliderB.setPageStep(0.01)
+        self.intThreshSliderB.setValue(self.annotatorjObj.intensityThreshValB)
         self.intThreshElB=QLineEdit(str(self.annotatorjObj.intensityThreshValB))
         self.intThreshElB.setToolTip('Blue intensity threshold value<br>for RGB (colour) images in the<br>range [0,1]')
         self.intThreshSliderB.valueChanged.connect(self.intThreshBChanged) # def fcn(self,val) <-- val is the slider value
         self.intThreshElB.editingFinished.connect(self.intThreshBChangedText) # sets slider.setValue(newVal)
+        self.intThreshElB.setStyleSheet(f'background-color: rgba(0, 0, 0, 0); max-width: {int(self.annotatorjObj.bsize2/3)};')
 
         self.range01_1=QLabel('[0-1]')
         self.range01_2=QLabel('[0-1]')
         self.range01_3=QLabel('[0-1]')
         self.range01_4=QLabel('[0-1]')
 
-        self.corrMethodLabel=QLabel('Method: ')
+        self.corrMethodLabel=QLabel('Method:')
         self.corrMethodLabel.setToolTip('Correction method')
-        self.unetLabel=QLabel('U-Net')
+        self.corrMethodLabel.setIndent(20)
+        self.corrMethodRBtnGroup=QButtonGroup()
+        self.unetLabel=QRadioButton('U-Net')
         self.unetLabel.setToolTip('U-Net deep learning method')
-        self.classicLabel=QLabel('Classic')
+        self.unetLabel.toggled.connect(self.corrMethodChanged)
+        self.classicLabel=QRadioButton('Classic')
         self.classicLabel.setToolTip('Classic image processing<br>method (region growing)')
+        self.classicLabel.toggled.connect(self.corrMethodChanged)
+        self.corrMethodRBtnGroup.addButton(self.unetLabel)
+        self.corrMethodRBtnGroup.addButton(self.classicLabel)
+        if self.annotatorjObj.selectedCorrMethod==0:
+            # U-Net
+            self.unetLabel.toggle()
+        else:
+            # classic
+            self.classicLabel.toggle()
 
-        self.methodSlider=QSlider(Qt.Orientation.Horizontal)
-        self.methodSlider.setRange(0, 1)
-        self.methodSlider.setPageStep(1)
-        self.methodSlider.valueChanged.connect(self.corrMethodChanged)
+        self.modelLabel=QLabel('Model')
+        self.modelLabel.setToolTip('U-Net model used in Contour assist mode')
+        self.modelLabel.setIndent(20)
 
-        self.modelFullLabel=QLabel('full file: ')
+        self.modelFullLabel=QLabel('full file:')
         self.modelFullLabel.setToolTip('Name of the combined weights + graph model file (e.g. model_real.hdf5)')
+        self.modelFullLabel.setIndent(40)
         self.modelFullEl=QLineEdit(self.annotatorjObj.modelFullFile)
         self.modelFullEl.editingFinished.connect(self.setModelFullFile)
 
-        self.modelJsonLabel=QLabel('.json file: ')
+        self.modelJsonLabel=QLabel('.json file:')
         self.modelJsonLabel.setToolTip('Name of the model graph .json file <b>without</b> .json (e.g. model_real)')
+        self.modelJsonLabel.setIndent(40)
         self.modelJsonEl=QLineEdit(self.annotatorjObj.modelJsonFile)
         self.modelJsonEl.editingFinished.connect(self.setModelJsonFile)
 
-        self.modelFolderLabel=QLabel('folder: ')
+        self.modelFolderLabel=QLabel('folder:')
         self.modelFolderLabel.setToolTip('Path of the model folder (e.g. c:/Users/user/.napari_annotatorj/models). On Windows mind the "/" slash character instead of "\\".')
+        self.modelFolderLabel.setIndent(40)
         self.modelFolderEl=QLineEdit(self.annotatorjObj.modelFolder)
         self.modelFolderEl.editingFinished.connect(self.setModelFolder)
+        self.modelFolderBtn=QPushButton('Browse...')
+        self.modelFolderBtn.clicked.connect(self.browseModelFolder)
 
-        self.modelWeightsLabel=QLabel('weights file: ')
+        self.modelWeightsLabel=QLabel('weights file:')
         self.modelWeightsLabel.setToolTip('Name of the model weights file <b>with</b> extension (e.g. model_real_weights.h5)')
+        self.modelWeightsLabel.setIndent(40)
         self.modelWeightsEl=QLineEdit(self.annotatorjObj.modelWeightsFile)
         self.modelWeightsEl.editingFinished.connect(self.setModelWeightsFile)
 
-        self.corrBrushLabel=QLabel('Brush size: ')
+        self.corrBrushLabel=QLabel('Brush size:')
+        self.corrBrushLabel.setIndent(20)
         self.corrBrushLabel.setToolTip('Correction brush size<br>(diameter) in pixels')
         self.corrBrushEl=QLineEdit(str(self.annotatorjObj.correctionBrushSize))
-        self.corrBrushEl.editingFinished.connect(self.setCorrBrushSize)
+        self.corrBrushEl.editingFinished.connect(self.setCorrBrushSize) # sets slider.setValue(newVal)
+        self.corrBrushSlider=QSlider(Qt.Orientation.Horizontal)
+        self.corrBrushSlider.setRange(0, 300)
+        self.corrBrushSlider.setPageStep(1)
+        self.corrBrushSlider.setValue(self.annotatorjObj.correctionBrushSize)
+        self.corrBrushSlider.valueChanged.connect(self.corrBrushChanged) # def fcn(self,val) <-- val is the slider value
+        self.corrBrushEl.setStyleSheet(f'background-color: rgba(0, 0, 0, 0); max-width: {int(self.annotatorjObj.bsize2/2)};')
 
-        self.semBrushLabel=QLabel('Brush size: ')
+        self.semBrushLabel=QLabel('Brush size:')
         self.semBrushLabel.setToolTip('')
+        self.semBrushLabel.setIndent(20)
         self.semBrushEl=QLineEdit(str(self.annotatorjObj.semanticBrushSize))
         self.semBrushEl.editingFinished.connect(self.setSemBrushSize)
+        self.semBrushSlider=QSlider(Qt.Orientation.Horizontal)
+        self.semBrushSlider.setRange(0, 300)
+        self.semBrushSlider.setPageStep(1)
+        self.semBrushSlider.setValue(self.annotatorjObj.semanticBrushSize)
+        self.semBrushSlider.valueChanged.connect(self.semBrushChanged) # def fcn(self,val) <-- val is the slider value
+        self.semBrushEl.setStyleSheet(f'background-color: rgba(0, 0, 0, 0); max-width: {int(self.annotatorjObj.bsize2/2)};')
 
-        self.saveAnnotTimesLabel=QLabel('save annot times: ')
-        self.saveAnnotTimesLabel.setToolTip('Save annotation times to .csv file per object')
-        self.saveAnnotTimesChkBx=QCheckBox()
+        self.saveAnnotTimesChkBx=QCheckBox('Save annot times')
+        self.saveAnnotTimesChkBx.setToolTip('Save annotation times to .csv file per object')
         self.saveAnnotTimesChkBx.setChecked(self.annotatorjObj.saveAnnotTimes)
         self.saveAnnotTimesChkBx.stateChanged.connect(self.setSaveAnnotTimes)
+        self.saveAnnotTimesChkBx.setEnabled(False)
+        self.saveAnnotTimesChkBx.setStyleSheet("color: gray")
+
+        self.importLabel=QLabel('Mask / text import')
+        self.importLabel.setToolTip('Mask image or text coordinate file import options')
+
+        self.autoMaskLoadChkBx=QCheckBox('Auto mask load')
+        self.autoMaskLoadChkBx.setToolTip('Load masks or text file coordinates automatically when stepping to the previous or next image')
+        self.autoMaskLoadChkBx.setChecked(self.annotatorjObj.saveAnnotTimes)
+        self.autoMaskLoadChkBx.stateChanged.connect(self.setAutoMaskLoad)
+
+        self.enableMaskLoadChkBx=QCheckBox('Enable mask load')
+        self.enableMaskLoadChkBx.setToolTip('Enables loading a mask image as ROIs (shapes)')
+        self.enableMaskLoadChkBx.setChecked(self.annotatorjObj.saveAnnotTimes)
+        self.enableMaskLoadChkBx.stateChanged.connect(self.setEnableMaskLoad)
+
+        self.enableTextLoadChkBx=QCheckBox('Enable text load')
+        self.enableTextLoadChkBx.setToolTip('Enables loading a text coordinates file as bounding boxes')
+        self.enableTextLoadChkBx.setChecked(self.annotatorjObj.saveAnnotTimes)
+        self.enableTextLoadChkBx.stateChanged.connect(self.setEnableTextLoad)
+
+        self.importMethodLabel=QLabel('Method:')
+        self.importMethodLabel.setToolTip('Mask/text import method')
+        self.importMethodLabel.setIndent(20)
+        self.importRBtnGroup=QButtonGroup()
+        self.loadLabel=QRadioButton('load')
+        self.loadLabel.setToolTip('Import elements to annotation layer (ROI)')
+        self.loadLabel.toggled.connect(self.importMethodChanged)
+        self.overlayLabel=QRadioButton('overlay')
+        self.overlayLabel.setToolTip('Import elements to overlay layer (overlay)')
+        self.overlayLabel.toggled.connect(self.importMethodChanged)
+        self.importRBtnGroup.addButton(self.loadLabel)
+        self.importRBtnGroup.addButton(self.overlayLabel)
+        if self.annotatorjObj.loadOrOverlay=='load':
+            # load
+            self.loadLabel.toggle()
+        elif self.annotatorjObj.loadOrOverlay=='overlay':
+            # overlay
+            self.overlayLabel.toggle()
+
+        self.basicOptionsLabel=QLabel('Basic settings')
+        self.advancedOptionsLabel=QLabel('Advanced settings')
+        self.advancedOptionsLabel.setToolTip('Settings for advanced users')
+        self.advancedSeparator=self.createLineSeparator(width=1)
+        self.contassistOptionsLabel=QLabel('Contour assist')
+        self.contasssistSeparator=self.createLineSeparator(width=0.5,colour='rgba(255,255,255,0.25)')
+        self.semOptionsLabel=QLabel('Semantic segmentation')
+        self.semSeparator=self.createLineSeparator(width=0.5,colour='rgba(255,255,255,0.25)')
+
+        self.restSeparator=self.createLineSeparator(width=0.5,colour='rgba(255,255,255,0.25)')
 
         self.optionsOkBtn=QPushButton('Ok')
         self.optionsOkBtn.setToolTip('Apply changes')
@@ -7157,23 +7255,155 @@ class OptionsFrame(QWidget):
         self.optionsCancelBtn.clicked.connect(self.cancelOptions)
         #self.optionsCancelBtn.setStyleSheet(f"max-width: {int(self.annotatorjObj.bsize2)}px")
 
+        self.optionsMainOUterVbox=QVBoxLayout()
+        self.scroll=QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.inner = QFrame(self.scroll)
         self.optionsMainVbox=QVBoxLayout()
+        self.inner.setLayout(self.optionsMainVbox)
+        self.scroll.setWidget(self.inner)
+        
+        #self.optionsMainVbox=QVBoxLayout()
         self.typeHBox=QHBoxLayout()
+        self.rememberHBox=QHBoxLayout()
+        self.colourHBox=QHBoxLayout()
+        self.classHBox=QHBoxLayout()
         self.btnHBox=QHBoxLayout()
+        self.advancedVBox=QVBoxLayout()
+        self.semBrushHBox=QHBoxLayout()
+        self.maxDistHBox=QHBoxLayout()
+        self.threshHBox=QHBoxLayout()
+        self.threshRGBHBox=QHBoxLayout()
+        self.corrBrushHBox=QHBoxLayout()
+        self.methodHBox=QHBoxLayout()
+        self.modelFolderHBox=QHBoxLayout()
+        self.modelJsonHBox=QHBoxLayout()
+        self.modelFullHBox=QHBoxLayout()
+        self.modelWeightsHBox=QHBoxLayout()
+        self.timesHBox=QHBoxLayout()
+        self.importVBox=QVBoxLayout()
+        self.importHBox=QHBoxLayout()
+        self.importInnerVBox=QVBoxLayout()
+        self.importMethodHBox=QHBoxLayout()
         
         self.typeHBox.addWidget(self.annotTypeLabel)
         self.typeHBox.addWidget(self.annotTypeBox)
         self.typeHBox.setAlignment(Qt.AlignLeft)
 
+        self.rememberHBox.addWidget(self.annotTypeRemChkBx)
+
+        self.colourHBox.addWidget(self.colourLabel)
+        self.colourHBox.addWidget(self.colourSettingBtn)
+        self.colourHBox.setAlignment(Qt.AlignLeft)
+
+        self.classHBox.addWidget(self.classesSaveFolderNamesLabel)
+        self.classHBox.addWidget(self.classesSaveFolderNamesList)
+
         self.btnHBox.addWidget(self.optionsOkBtn)
         self.btnHBox.addWidget(self.optionsCancelBtn)
         #self.btnHBox.setAlignment(Qt.AlignRight)
 
+        # semantic settings
+        self.semBrushHBox.addWidget(self.semBrushLabel)
+        self.semBrushHBox.addWidget(self.semBrushSlider)
+        self.semBrushHBox.addWidget(self.semBrushEl)
+        self.semBrushHBox.addWidget(self.pixelLabel_3)
+
+        # contour assist settings
+        self.maxDistHBox.addWidget(self.distanceThreshLabel)
+        self.maxDistHBox.addWidget(self.distanceThreshSlider)
+        self.maxDistHBox.addWidget(self.distanceThreshEl)
+        self.maxDistHBox.addWidget(self.pixelLabel_1)
+
+        self.threshHBox.addWidget(self.intThreshLabel)
+        self.threshHBox.addWidget(self.intThreshSlider)
+        self.threshHBox.addWidget(self.intThreshEl)
+        self.threshHBox.addWidget(self.range01_1)
+
+        self.threshRGBHBox.addWidget(self.intThreshLabelR)
+        self.threshRGBHBox.addWidget(self.intThreshSliderR)
+        self.threshRGBHBox.addWidget(self.intThreshElR)
+        self.threshRGBHBox.addWidget(self.intThreshSliderG)
+        self.threshRGBHBox.addWidget(self.intThreshElG)
+        self.threshRGBHBox.addWidget(self.intThreshSliderB)
+        self.threshRGBHBox.addWidget(self.intThreshElB)
+        self.threshRGBHBox.addWidget(self.range01_2)
+
+        self.corrBrushHBox.addWidget(self.corrBrushLabel)
+        self.corrBrushHBox.addWidget(self.corrBrushSlider)
+        self.corrBrushHBox.addWidget(self.corrBrushEl)
+        self.corrBrushHBox.addWidget(self.pixelLabel_2)
+
+        self.methodHBox.addWidget(self.corrMethodLabel)
+        self.methodHBox.addWidget(self.unetLabel)
+        #self.methodHBox.addWidget(self.methodSlider)
+        self.methodHBox.addWidget(self.classicLabel)
+
+        self.modelFolderHBox.addWidget(self.modelFolderLabel)
+        self.modelFolderHBox.addWidget(self.modelFolderEl)
+        self.modelFolderHBox.addWidget(self.modelFolderBtn)
+        self.modelJsonHBox.addWidget(self.modelJsonLabel)
+        self.modelJsonHBox.addWidget(self.modelJsonEl)
+        self.modelWeightsHBox.addWidget(self.modelWeightsLabel)
+        self.modelWeightsHBox.addWidget(self.modelWeightsEl)
+        self.modelFullHBox.addWidget(self.modelFullLabel)
+        self.modelFullHBox.addWidget(self.modelFullEl)
+
+        # rest of the settings
+        # import options
+        self.importInnerVBox.addWidget(self.autoMaskLoadChkBx)
+        self.importInnerVBox.addWidget(self.enableMaskLoadChkBx)
+        self.importInnerVBox.addWidget(self.enableTextLoadChkBx)
+        self.importMethodHBox.addWidget(self.importMethodLabel)
+        self.importMethodHBox.addWidget(self.loadLabel)
+        #self.importMethodHBox.addWidget(self.importSlider)
+        self.importMethodHBox.addWidget(self.overlayLabel)
+        self.importInnerVBox.addLayout(self.importMethodHBox)
+
+        self.importHBox.addSpacing(20)
+        self.importHBox.addLayout(self.importInnerVBox)
+
+        self.importVBox.addWidget(self.importLabel)
+        self.importVBox.addLayout(self.importHBox)
+
+        # extra options
+        self.timesHBox.addWidget(self.saveAnnotTimesChkBx)
+
+        # main layout
+        self.advancedVBox.addWidget(self.advancedSeparator)
+        self.advancedVBox.addWidget(self.advancedOptionsLabel)
+        self.advancedVBox.addWidget(self.contasssistSeparator)
+        self.advancedVBox.addWidget(self.contassistOptionsLabel)
+        self.advancedVBox.addLayout(self.maxDistHBox)
+        self.advancedVBox.addWidget(self.intThreshLabelMain)
+        self.advancedVBox.addLayout(self.threshHBox)
+        self.advancedVBox.addLayout(self.threshRGBHBox)
+        self.advancedVBox.addLayout(self.corrBrushHBox)
+        self.advancedVBox.addLayout(self.methodHBox)
+        self.advancedVBox.addWidget(self.modelLabel)
+        self.advancedVBox.addLayout(self.modelFolderHBox)
+        self.advancedVBox.addLayout(self.modelJsonHBox)
+        self.advancedVBox.addLayout(self.modelWeightsHBox)
+        self.advancedVBox.addLayout(self.modelFullHBox)
+        self.advancedVBox.addWidget(self.restSeparator)
+        self.advancedVBox.addLayout(self.importVBox)
+        self.advancedVBox.addLayout(self.timesHBox)
+
         self.optionsMainVbox.addWidget(self.titleLabel)
         self.optionsMainVbox.addLayout(self.typeHBox)
+        self.optionsMainVbox.addLayout(self.rememberHBox)
+        self.optionsMainVbox.addLayout(self.colourHBox)
+        self.optionsMainVbox.addLayout(self.classHBox)
+        self.optionsMainVbox.addWidget(self.semOptionsLabel)
+        #self.optionsMainVbox.addWidget(self.semSeparator)
+        self.optionsMainVbox.addLayout(self.semBrushHBox)
+        self.optionsMainVbox.addLayout(self.advancedVBox)
         self.optionsMainVbox.addLayout(self.btnHBox)
 
-        self.setLayout(self.optionsMainVbox)
+        self.optionsMainOUterVbox.addWidget(self.scroll)
+        self.setLayout(self.optionsMainOUterVbox)
+
+        #self.setLayout(self.optionsMainVbox)
         #self.show()
         dw=self.viewer.window.add_dock_widget(self,name='Options')
         self.annotatorjObj.optionsWidget=dw
@@ -7342,9 +7572,32 @@ class OptionsFrame(QWidget):
         pass
 
 
-    def classSaveListSelectionChanged(self):
+    def classSaveListSelectionChanged(self,current,previous):
+        if current==self.classesSaveFolderNamesList.item(self.classesSaveFolderNamesList.count()-1):
+            # last element changed
+            print('last element selected')
+        else:
+            print('changed the selected class item')
+
         # TODO
         pass
+
+
+    #def classSaveListItemChanged(self,text):
+    def classSaveListItemChanged(self,item):
+        if self.classesSaveFolderNamesList.currentRow()==self.classesSaveFolderNamesList.count()-1:
+            # last element is selected
+            if item.text()=='':
+                # text is empty, did not update, do nothing
+                pass
+            else:
+                # changed the text of the last item, add a new dummy to the end of the list
+                self.classesSaveFolderNamesList.addItem('')
+                item=self.classesSaveFolderNamesList.item(self.classesSaveFolderNamesList.count()-1)
+                item.setFlags(item.flags() | Qt.ItemIsEditable)
+                print('added new empty item to classes list')
+        else:
+            print(f'updated the selected item to {item.text()}')
 
 
     def distanceThreshChanged(self,val):
@@ -7408,6 +7661,9 @@ class OptionsFrame(QWidget):
 
 
     def corrMethodChanged(self,val):
+        rbtn=self.sender()
+        if rbtn.isChecked()==True:
+            print(rbtn.text())
         # TODO
         pass
 
@@ -7437,7 +7693,17 @@ class OptionsFrame(QWidget):
         pass
 
 
+    def corrBrushChanged(self,val):
+        # TODO
+        pass
+
+
     def setSemBrushSize(self):
+        # TODO
+        pass
+
+
+    def semBrushChanged(self,val):
         # TODO
         pass
 
@@ -7445,6 +7711,61 @@ class OptionsFrame(QWidget):
     def setSaveAnnotTimes(self):
         # TODO
         pass
+
+
+    def setAutoMaskLoad(self):
+        # TODO
+        pass
+
+
+    def setEnableMaskLoad(self):
+        # TODO
+        pass
+
+
+    def setEnableTextLoad(self):
+        # TODO
+        pass
+
+
+    def importMethodChanged(self):
+        # TODO
+        pass
+
+
+    def createLineSeparator(self,width=1,colour='gray'):
+        line=QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setFrameShadow(QFrame.Plain)
+        line.setStyleSheet(f"border-style: none none solid none; border-color: {colour}; border-width: {width}px;")
+        return line
+
+
+    def browseModelFolder(self):
+        # TODO
+        pass
+
+
+    def popColourWidget(self):
+        # create the Colours widget
+        self.annotatorjObj.addColourWidget()
+        # bring the colour widget forward
+        self.bringColourWidgetForth()
+
+
+    def bringColourWidgetForth(self):
+        if self.annotatorjObj.firstDockWidget==self.annotatorjObj.optionsWidget and self.annotatorjObj.firstDockWidgetName=='Options':
+            # this should be the case when the button is clicked from the Options widget
+            vals=[]
+            for w in self.viewer.window._dock_widgets.values():
+                vals.append(w)
+            last=vals[-1]
+            last.show()
+            last.raise_()
+            print('Colours widget raised')
+        else:
+            # this should never happen
+            print(f'Incosistent widgets. firstDockWidgetName: {self.annotatorjObj.firstDockWidgetName}')
 
 
 # -------------------------------------
