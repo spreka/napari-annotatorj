@@ -26,6 +26,7 @@ import cv2
 from copy import deepcopy,copy
 #from napari.qt import create_worker #thread_worker
 from napari.qt.threading import thread_worker #create_worker
+from napari._qt.qt_resources import get_stylesheet
 from tqdm import tqdm
 
 # suppress numpy's FutureWarning: numpy\core\numeric.py:2449: FutureWarning: elementwise comparison failed; returning scalar instead, but in the future will perform elementwise comparison!
@@ -65,6 +66,7 @@ class AnnotatorJ(QWidget):
         self.testMode=False # for initial testing
         self.defDir=''
         self.defFile=''
+        self.destNameRaw=None
         self.editMode=False
         self.startedEditing=False
         self.editROIidx=-1
@@ -189,6 +191,11 @@ class AnnotatorJ(QWidget):
 
         # supported image formats
         self.imageExsts=['.png','.bmp','.jpg','.jpeg','.tif','.tiff']
+
+        # set listener for layer events
+        self.viewer.layers.events.inserted.connect(self.layerInserted)
+        self.viewer.layers.events.removed.connect(self.layerRemoved)
+        self.viewer.layers.events.reordered.connect(self.layerReordered)
 
         # ---------------------------
         # add buttons and ui elements
@@ -407,35 +414,8 @@ class AnnotatorJ(QWidget):
         else:
             # browse an original image
 
-            # closing & saving previous annotations moved to separate fcn
-            self.closeWindowsAndSave()
-
-            # TODO: add checkbox checks
-
-            # check contour assist setting
-            if self.contAssist:
-                self.addAuto=False
-                self.chckbxAddAutomatically.setEnabled(False)
-                print('< contour assist mode is active')
-                self.editMode=False
-
-                self.classMode=False
-                self.chckbxClass.setEnabled(False)
-                self.chckbxClass.setStyleSheet("color: gray")
-
-            # check edit mode setting
-            if self.editMode:
-                self.addAuto=False
-                self.chckbxAddAutomatically.setEnabled(False)
-                print('< edit mode is active')
-                self.contAssist=False
-                self.chckbxContourAssist.setEnabled(False)
-                self.chckbxContourAssist.setStyleSheet("color: gray")
-
-                self.classMode=False
-                self.chckbxClass.setEnabled(False)
-                self.chckbxClass.setStyleSheet("color: gray")
-
+            # moved to its separate fcn
+            self.preInitChkBxs()
 
             if not self.imageFromArgs:
                 if self.stepping:
@@ -463,13 +443,245 @@ class AnnotatorJ(QWidget):
 
         imageLayer = self.viewer.add_image(img,name='Image')
 
+        s=imageLayer.data.shape
+        self.imgSize=s
+
+        # finish initializing params and checkboxes
+        # moved to its own fcn
+        self.finishOpenNewInit()
+
+
+    def preInitChkBxs(self):
+        # closing & saving previous annotations moved to separate fcn
+        self.closeWindowsAndSave()
+
+        # TODO: add checkbox checks
+
+        # check contour assist setting
+        if self.contAssist:
+            self.addAuto=False
+            self.chckbxAddAutomatically.setEnabled(False)
+            print('< contour assist mode is active')
+            self.editMode=False
+
+            self.classMode=False
+            self.chckbxClass.setEnabled(False)
+            self.chckbxClass.setStyleSheet("color: gray")
+
+        # check edit mode setting
+        if self.editMode:
+            self.addAuto=False
+            self.chckbxAddAutomatically.setEnabled(False)
+            print('< edit mode is active')
+            self.contAssist=False
+            self.chckbxContourAssist.setEnabled(False)
+            self.chckbxContourAssist.setStyleSheet("color: gray")
+
+            self.classMode=False
+            self.chckbxClass.setEnabled(False)
+            self.chckbxClass.setStyleSheet("color: gray")
+
+
+    def initChkBoxes(self,initSrc=None):
+        if self.selectedAnnotationType=='instance':
+            if not self.contAssist:
+                # contAssist is off
+                if not self.editMode:
+                    # edit mode is off
+                    if not self.classMode:
+                        # class mode is off
+                        # enable contour correction
+                        #self.chckbxAddAutomatically.setEnabled(True)
+                        if initSrc==self.chkEdit:
+                            # do not init again
+                            pass
+                        else:
+                            self.chkEdit.setEnabled(True)
+                            self.chkEdit.setStyleSheet("color: white")
+                        if initSrc==self.chckbxContourAssist:
+                            # do not init again
+                            pass
+                        else:
+                            self.chckbxContourAssist.setEnabled(True)
+                            self.chckbxContourAssist.setStyleSheet("color: white")
+                        if initSrc==self.chckbxClass:
+                            # do not init again
+                            pass
+                        else:
+                            self.chckbxClass.setEnabled(True)
+                            self.chckbxClass.setStyleSheet("color: white")
+                    else:
+                        # class mode is on
+                        # disable the others
+                        #self.chckbxAddAutomatically.setChecked(False)
+                        #self.chckbxAddAutomatically.setEnabled(False)
+                        if initSrc==self.chkEdit:
+                            # do not init again
+                            pass
+                        else:
+                            self.chkEdit.setChecked(False)
+                            self.chkEdit.setEnabled(False)
+                            self.chkEdit.setStyleSheet("color: gray")
+                        if initSrc==self.chckbxContourAssist:
+                            # do not init again
+                            pass
+                        else:
+                            self.chckbxContourAssist.setChecked(False)
+                            self.chckbxContourAssist.setEnabled(False)
+                            self.chckbxContourAssist.setStyleSheet("color: gray")
+
+                        if initSrc==self.chckbxClass:
+                            # do not init again
+                            pass
+                        else:
+                            self.chckbxClass.setEnabled(True)
+                            self.chckbxClass.setStyleSheet("color: white")
+
+                        self.editMode=False
+                        self.addAuto=False
+                        self.contAssist=False
+                    
+                else:
+                    # edit mode is on
+                    # disable contour correction
+                    #self.chckbxAddAutomatically.setChecked(False)
+                    #self.chckbxAddAutomatically.setEnabled(False)
+                    if initSrc==self.chkEdit:
+                        # do not init again
+                        pass
+                    else:
+                        self.chkEdit.setEnabled(True)
+                        self.chkEdit.setStyleSheet("color: white")
+                    if initSrc==self.chckbxContourAssist:
+                        # do not init again
+                        pass
+                    else:
+                        self.chckbxContourAssist.setChecked(False)
+                        self.chckbxContourAssist.setEnabled(False)
+                        self.chckbxContourAssist.setStyleSheet("color: gray")
+
+                    if initSrc==self.chckbxClass:
+                        # do not init again
+                        pass
+                    else:
+                        self.chckbxClass.setChecked(False)
+                        self.chckbxClass.setEnabled(False)
+                        self.chckbxClass.setStyleSheet("color: gray")
+
+                    self.addAuto=False
+                    self.classMode=False
+
+            else:
+                # contAssist is on
+                #self.chckbxAddAutomatically.setChecked(False)
+                #self.chckbxAddAutomatically.setEnabled(False)
+                if initSrc==self.chkEdit:
+                    # do not init again
+                    pass
+                else:
+                    self.chkEdit.setChecked(False)
+                    self.chkEdit.setEnabled(False)
+                    self.chkEdit.setStyleSheet("color: gray")
+                if initSrc==self.chckbxContourAssist:
+                    # do not init again
+                    pass
+                else:
+                    self.chckbxContourAssist.setEnabled(True)
+                    self.chckbxContourAssist.setStyleSheet("color: white")
+
+                if initSrc==self.chckbxClass:
+                    # do not init again
+                    pass
+                else:
+                    self.chckbxClass.setChecked(False)
+                    self.chckbxClass.setEnabled(False)
+                    self.chckbxClass.setStyleSheet("color: gray")
+
+                self.editMode=False
+                self.addAuto=False
+                self.classMode=False
+        
+        # semantic painting annotation type
+        elif self.selectedAnnotationType=='semantic':
+            # disable contour correction
+            self.addAuto=False
+            self.editMode=False
+            self.contAssist=False
+            self.classMode=False
+            if initSrc==self.chckbxContourAssist:
+                # do not init again
+                pass
+            else:
+                self.chckbxContourAssist.setChecked(False)
+                #self.chckbxAddAutomatically.setChecked(False)
+                #self.chckbxAddAutomatically.setEnabled(False)
+                self.chckbxContourAssist.setEnabled(False)
+                self.chckbxContourAssist.setStyleSheet("color: gray")
+            if initSrc==self.chckbxClass:
+                # do not init again
+                pass
+            else:
+                self.chckbxClass.setChecked(False)
+                self.chckbxClass.setEnabled(False)
+                self.chckbxClass.setStyleSheet("color: gray")
+            if initSrc==self.chkEdit:
+                # do not init again
+                pass
+            else:
+                self.chkEdit.setChecked(False)
+                self.chkEdit.setEnabled(False)
+                self.chkEdit.setStyleSheet("color: gray")
+
+        elif self.selectedAnnotationType=='bbox':
+            # disable contour correction
+            self.editMode=False
+            self.contAssist=False
+            #self.chckbxAddAutomatically.setEnabled(True)
+            if initSrc==self.chkEdit:
+                # do not init again
+                pass
+            else:
+                self.chkEdit.setChecked(False)
+                self.chkEdit.setEnabled(False)
+                self.chkEdit.setStyleSheet("color: gray")
+            if initSrc==self.chckbxContourAssist:
+                # do not init again
+                pass
+            else:
+                self.chckbxContourAssist.setChecked(False)
+                self.chckbxContourAssist.setEnabled(False)
+                self.chckbxContourAssist.setStyleSheet("color: gray")
+            if initSrc==self.chckbxClass:
+                # do not init again
+                pass
+            else:
+                self.chckbxClass.setEnabled(True)
+                self.chckbxClass.setStyleSheet("color: white")
+
+
+    def bindKeys(self,layer):
+        if type(layer) is Shapes:
+            # add Shapes-specific shortcuts here
+            layer.bind_key('c',func=self.toggleClassMode,overwrite=True)
+            if self.selectedAnnotationType=='instance':
+                layer.bind_key('a',func=self.toggleContAssistMode,overwrite=True)
+            layer.bind_key('Shift-e',func=self.toggleEditMode,overwrite=True)
+        elif type(layer) is Labels:
+            # add Labels-specific shortcuts here
+            pass
+
+        # add non layer-specific shortcuts here
+        layer.bind_key('o',func=self.showOptionsWidget,overwrite=True)
+        layer.bind_key('Shift-v',func=self.toggleShowContours,overwrite=True)
+
+
+    def finishOpenNewInit(self,initSrc=None):
         # check if a shapes layer already exists for the rois
         # if so, bring it forward
         roiLayer=self.findROIlayer(True)
 
+        s=self.imgSize
         # set roi edge width for visibility
-        s=imageLayer.data.shape
-        self.imgSize=s
         if (s[0]<=300) and (s[1]<=300):
             self.annotEdgeWidth=0.5
         elif (s[0]>300 and s[0]<=500) or (s[1]>300 and s[1]<=500):
@@ -554,7 +766,7 @@ class AnnotatorJ(QWidget):
             self.SaveNewProp('selectedAnnotationType',self.selectedAnnotationType)
 
         # init chkbox settings
-        self.initChkBoxes()
+        self.initChkBoxes(initSrc=initSrc)
 
         # instance annotation type
         if self.selectedAnnotationType=='instance':
@@ -630,9 +842,9 @@ class AnnotatorJ(QWidget):
 
         # reset contour assist layer
         self.inAssisting=False
-        if self.contAssist:
+        if self.contAssist and initSrc!=self.chckbxContourAssist:
             self.setContourAssist(Qt.Checked)
-        elif not self.contAssist and self.selectedAnnotationType!='semantic':
+        elif not self.contAssist and self.selectedAnnotationType!='semantic' and initSrc!=self.chckbxContourAssist:
             self.setContourAssist(False)
 
         self.overlayAdded=False
@@ -643,127 +855,6 @@ class AnnotatorJ(QWidget):
 
         # when open function finishes:
         self.started=True
-
-
-    def initChkBoxes(self):
-        if self.selectedAnnotationType=='instance':
-            if not self.contAssist:
-                # contAssist is off
-                if not self.editMode:
-                    # edit mode is off
-                    if not self.classMode:
-                        # class mode is off
-                        # enable contour correction
-                        #self.chckbxAddAutomatically.setEnabled(True)
-                        self.chkEdit.setEnabled(True)
-                        self.chkEdit.setStyleSheet("color: white")
-                        self.chckbxContourAssist.setEnabled(True)
-                        self.chckbxContourAssist.setStyleSheet("color: white")
-                        self.chckbxClass.setEnabled(True)
-                        self.chckbxClass.setStyleSheet("color: white")
-                    else:
-                        # class mode is on
-                        # disable the others
-                        #self.chckbxAddAutomatically.setChecked(False)
-                        #self.chckbxAddAutomatically.setEnabled(False)
-                        self.chkEdit.setChecked(False)
-                        self.chkEdit.setEnabled(False)
-                        self.chkEdit.setStyleSheet("color: gray")
-                        self.chckbxContourAssist.setChecked(False)
-                        self.chckbxContourAssist.setEnabled(False)
-                        self.chckbxContourAssist.setStyleSheet("color: gray")
-
-                        self.chckbxClass.setEnabled(True)
-                        self.chckbxClass.setStyleSheet("color: white")
-
-                        self.editMode=False
-                        self.addAuto=False
-                        self.contAssist=False
-                    
-                else:
-                    # edit mode is on
-                    # disable contour correction
-                    #self.chckbxAddAutomatically.setChecked(False)
-                    #self.chckbxAddAutomatically.setEnabled(False)
-                    self.chkEdit.setEnabled(True)
-                    self.chkEdit.setStyleSheet("color: white")
-                    self.chckbxContourAssist.setChecked(False)
-                    self.chckbxContourAssist.setEnabled(False)
-                    self.chckbxContourAssist.setStyleSheet("color: gray")
-
-                    self.chckbxClass.setChecked(False)
-                    self.chckbxClass.setEnabled(False)
-                    self.chckbxClass.setStyleSheet("color: gray")
-
-                    self.addAuto=False
-                    self.classMode=False
-
-            else:
-                # contAssist is on
-                #self.chckbxAddAutomatically.setChecked(False)
-                #self.chckbxAddAutomatically.setEnabled(False)
-                self.chkEdit.setChecked(False)
-                self.chkEdit.setEnabled(False)
-                self.chkEdit.setStyleSheet("color: gray")
-                self.chckbxContourAssist.setEnabled(True)
-                self.chckbxContourAssist.setStyleSheet("color: white")
-
-                self.chckbxClass.setChecked(False)
-                self.chckbxClass.setEnabled(False)
-                self.chckbxClass.setStyleSheet("color: gray")
-
-                self.editMode=False
-                self.addAuto=False
-                self.classMode=False
-        
-        # semantic painting annotation type
-        elif self.selectedAnnotationType=='semantic':
-            # disable contour correction
-            self.addAuto=False
-            self.editMode=False
-            self.contAssist=False
-            self.classMode=False
-            self.chckbxContourAssist.setChecked(False)
-            #self.chckbxAddAutomatically.setChecked(False)
-            #self.chckbxAddAutomatically.setEnabled(False)
-            self.chckbxContourAssist.setEnabled(False)
-            self.chckbxContourAssist.setStyleSheet("color: gray")
-            self.chckbxClass.setChecked(False)
-            self.chckbxClass.setEnabled(False)
-            self.chckbxClass.setStyleSheet("color: gray")
-            self.chkEdit.setChecked(False)
-            self.chkEdit.setEnabled(False)
-            self.chkEdit.setStyleSheet("color: gray")
-
-        elif self.selectedAnnotationType=='bbox':
-            # disable contour correction
-            self.editMode=False
-            self.contAssist=False
-            #self.chckbxAddAutomatically.setEnabled(True)
-            self.chkEdit.setChecked(False)
-            self.chckbxContourAssist.setChecked(False)
-            self.chkEdit.setEnabled(False)
-            self.chkEdit.setStyleSheet("color: gray")
-            self.chckbxContourAssist.setEnabled(False)
-            self.chckbxContourAssist.setStyleSheet("color: gray")
-            self.chckbxClass.setEnabled(True)
-            self.chckbxClass.setStyleSheet("color: white")
-
-
-    def bindKeys(self,layer):
-        if type(layer) is Shapes:
-            # add Shapes-specific shortcuts here
-            layer.bind_key('c',func=self.toggleClassMode,overwrite=True)
-            if self.selectedAnnotationType=='instance':
-                layer.bind_key('a',func=self.toggleContAssistMode,overwrite=True)
-            layer.bind_key('Shift-e',func=self.toggleEditMode,overwrite=True)
-        elif type(layer) is Labels:
-            # add Labels-specific shortcuts here
-            pass
-
-        # add non layer-specific shortcuts here
-        layer.bind_key('o',func=self.showOptionsWidget,overwrite=True)
-        layer.bind_key('Shift-v',func=self.toggleShowContours,overwrite=True)
 
 
     def loadROIs(self):
@@ -794,8 +885,14 @@ class AnnotatorJ(QWidget):
             # browse an ImageJ ROI zip file
             # TODO
             if not self.started or (self.findImageLayer() is None or self.findImageLayer().data is None):
-                warnings.warn('Open an image and annotate it first')
-                return
+                # try to find an already opened image and use it
+                foundit=self.findOpenedImage()
+                if not foundit:
+                    warnings.warn('Open an image and annotate it first')
+                    return
+                else:
+                    # good to go
+                    pass
 
             # check if we have annotations in the list before loading anything to it
             roiLayer=self.findROIlayer()
@@ -1449,6 +1546,141 @@ class AnnotatorJ(QWidget):
         return loadedAutoRoi
 
 
+    def findOpenedImage(self,initSrc=None):
+        success=False
+        # count the image layers first
+        imageLayers=[x for x in self.viewer.layers if x.__class__ is Image]
+        if len(imageLayers)==0:
+            print('no image layer found')
+        else:
+            print('at least 1 image layer found')
+            # check if already inited
+            if self.destNameRaw is not None and self.destNameRaw!='' and self.findImageLayerName():
+                return True
+
+            if len(imageLayers)==1:
+                x=imageLayers[0]
+                self.layerList=None
+            else:
+                self.layerList=imageLayers
+                x=self.popLayerSelector(layerType=Image)
+                if x is None:
+                    return False
+            success=self.initImageOpen(x,initSrc=initSrc)
+            if success:
+                return success
+        '''
+        for x in self.viewer.layers:
+            if x.__class__ is Image:
+                # found an image layer, return the first one
+                success=self.initImageOpen(x,initSrc=initSrc)
+                if success:
+                    return success
+        '''
+        return success
+
+
+    def initImageOpen(self,topImageLayer,initSrc=None):
+        if self.started:
+            # already started, nothing to do
+            return True
+        else:
+            img=topImageLayer.data
+            if img is not None:
+                self.preInitChkBxs()
+                # reset everything to AnnotatorJ convention
+                self.destNameRaw=topImageLayer.source.path
+                if self.destNameRaw is not None and self.destNameRaw!='':
+                    self.defDir,self.defFile=os.path.split(self.destNameRaw)
+                    topImageLayer.name='Image'
+
+                    self.curPredictionImageName=self.defFile
+                    self.curPredictionImage=None
+                    self.curOrigImage=None
+
+                    self.imgSize=img.shape
+
+                    # finish initializing params and checkboxes
+                    self.finishOpenNewInit(initSrc=initSrc)
+
+                    # reorder layers and hide other images
+                    self.showInitedImage(topImageLayer)
+                    print('inited image open')
+                    return True
+
+                else:
+                    # cannot find path and image name
+                    warnings.warn(f'Cannot initalize image layer')
+            else:
+                # image layer has no data
+                warnings.warn(f'Image layer is empty')
+
+            return False
+
+
+    def showInitedImage(self,imageLayer):
+        # bring this layer forward and reset the viewer
+        n=len(self.viewer.layers)
+        xLayerIdx=self.viewer.layers.index(imageLayer)
+        if xLayerIdx!=n-2:
+            # need to move it
+            self.viewer.layers.selection.clear()
+            self.viewer.layers.move_selected(xLayerIdx, n-2) # n-1
+        self.viewer.reset_view()
+
+        # hide the other image layers
+        for x in self.viewer.layers:
+            if x.__class__ is Image and x.name!=imageLayer.name:
+                x.visible=False
+
+
+    def popLayerSelector(self,layerType=Image):
+        # build a modal dialog where the layer can be chosen
+        self.layerChooserDialog=QDialog()
+        self.layerChooserDialog.setStyleSheet(get_stylesheet("dark"))
+        self.layerChooserDialog.setModal(True)
+        self.layerChooserDialog.setWindowTitle('Image layer not initialized')
+
+        layerNamesLabel=QLabel(f'Select Image layer:')
+        self.layerNamesBox=QComboBox()
+        for el in self.layerList:
+            self.layerNamesBox.addItem(el.name)
+        self.layerNamesBox.setCurrentIndex(0)
+
+        layerNamesOK=QPushButton('Ok')
+        layerNamesOK.clicked.connect(self.okLayerSelector)
+        layerNamesCancel=QPushButton('Cancel')
+        layerNamesCancel.clicked.connect(self.cancelLayerSelector)
+
+        boxLayout=QHBoxLayout()
+        boxLayout.addWidget(layerNamesLabel)
+        boxLayout.addWidget(self.layerNamesBox)
+        boxLayout.addWidget(layerNamesOK)
+        boxLayout.addWidget(layerNamesCancel)
+        self.layerChooserDialog.setLayout(boxLayout)
+        self.layerChooserDialog.show()
+        # add the dialog to the napari widgets --> not modal
+        #dw=self.viewer.window.add_dock_widget(self.layerChooserDialog,name='Select layer')
+        self.layerChooserDialog.exec()
+
+        return self.layerSelectorSelected
+
+
+    def cancelLayerSelector(self):
+        # selection was cancelled --> abort
+        self.layerSelectorSelected=None
+        self.layerChooserDialog.done(QDialog.Rejected)
+        return
+
+
+    def okLayerSelector(self):
+        choiceIdx=self.layerNamesBox.currentIndex()
+        # can set selected file name now:
+        self.layerSelectorSelected=self.layerList[choiceIdx]
+        print(f'Selected layer: {self.layerSelectorSelected}')
+        self.layerChooserDialog.done(QDialog.Accepted)
+
+
     def initClassColourLUT(self,rois):
         # setup a colour lut
         # loop through all ROIs and assign colours by classes
@@ -1866,7 +2098,14 @@ class AnnotatorJ(QWidget):
         # open a save dialog and save the rois to an imagej compatible roi.zip file
         self.finishedSaving=False
         if not self.started or (self.findImageLayer() is None or self.findImageLayer().data is None):
-            warnings.warn('Open an image and annotate it first')
+            # try to find an already opened image and use it
+            foundit=self.findOpenedImage()
+            if not foundit:
+                warnings.warn('Open an image and annotate it first')
+                return
+            else:
+                # good to go
+                pass
             if self.stepping:
                 self.finishedSaving=True
             return
@@ -2108,10 +2347,11 @@ class AnnotatorJ(QWidget):
                     
                     if len(newcoords)==2:
                         # just started, correct coords
-                        newcoords[0][0]=min(max(newcoords[0][0],0),self.imgSize[0]-1)
-                        newcoords[0][1]=min(max(newcoords[0][1],0),self.imgSize[1]-1)
-                        newcoords[1][0]=min(max(newcoords[1][0],0),self.imgSize[0]-1)
-                        newcoords[1][1]=min(max(newcoords[1][1],0),self.imgSize[1]-1)
+                        if self.imgSize is not None:
+                            newcoords[0][0]=min(max(newcoords[0][0],0),self.imgSize[0]-1)
+                            newcoords[0][1]=min(max(newcoords[0][1],0),self.imgSize[1]-1)
+                            newcoords[1][0]=min(max(newcoords[1][0],0),self.imgSize[0]-1)
+                            newcoords[1][1]=min(max(newcoords[1][1],0),self.imgSize[1]-1)
                         # workaround for saving the 2nd vertex coords as it  gets overwritten
                         backup2ndCoords=newcoords[1]
                     elif newcoords[1]!=backup2ndCoords:
@@ -3150,7 +3390,14 @@ class AnnotatorJ(QWidget):
 
         self.closeingOnPurpuse=True
         if not self.started:
-            warnings.warn('Use Open to select an image in a folder first')
+            # try to find an already opened image and use it
+            foundit=self.findOpenedImage()
+            if not foundit:
+                warnings.warn('Use Open to select an image in a folder first')
+                return
+            else:
+                # good to go
+                pass
             return
 
         # check if there is a list of images and if we can have a previous image
@@ -3200,7 +3447,14 @@ class AnnotatorJ(QWidget):
 
         self.closeingOnPurpuse=True
         if not self.started:
-            warnings.warn('Use Open to select an image in a folder first')
+            # try to find an already opened image and use it
+            foundit=self.findOpenedImage()
+            if not foundit:
+                warnings.warn('Use Open to select an image in a folder first')
+                return
+            else:
+                # good to go
+                pass
             return
 
         # check if there is a list of images and if we can have a previous image
@@ -3448,6 +3702,7 @@ class AnnotatorJ(QWidget):
             # show a dialog informing the user that prediction is being executed and wait
             # false to make in non-modal
             predictionStartedDialog=QDialog(self)
+            predictionStartedDialog.setStyleSheet(get_stylesheet("dark"))
             predictionStartedDialog.setWindowTitle('Suggesting contour, please wait...')
             #predictionStartedDialog.setText('Creating suggested contour, please wait...')
             predictionStartedDialog.setModal(False)
@@ -3960,6 +4215,17 @@ class AnnotatorJ(QWidget):
 
     def setEditMode(self,state):
         shapesLayer=self.findROIlayer()
+
+        # try to find an already opened image and use it
+        foundit=self.findOpenedImage(initSrc=self.chkEdit)
+        if not foundit:
+            warnings.warn('Use Open to select an image in a folder first')
+            self.editMode=False
+            return
+        else:
+            # good to go
+            pass
+
         if state == Qt.Checked:
             self.editMode=True
             print('Edit mode selected')
@@ -4051,6 +4317,16 @@ class AnnotatorJ(QWidget):
         if state == Qt.Checked:
             self.contAssist=True
             print('Contour assist selected')
+
+            # try to find an already opened image and use it
+            foundit=self.findOpenedImage(initSrc=self.chckbxContourAssist)
+            if not foundit:
+                warnings.warn('Use Open to select an image in a folder first')
+                self.contAssist=False
+                return
+            else:
+                # good to go
+                pass
             
             # disable auto adding was here, but it is already on by default
 
@@ -4122,6 +4398,17 @@ class AnnotatorJ(QWidget):
             warnings.warn('Class mode is not supported in semantic annotation type')
             return
         shapesLayer=self.findROIlayer()
+
+        # try to find an already opened image and use it
+        foundit=self.findOpenedImage(initSrc=self.chckbxClass)
+        if not foundit:
+            warnings.warn('Use Open to select an image in a folder first')
+            self.classMode=False
+            return
+        else:
+            # good to go
+            pass
+
         if state == Qt.Checked:
             self.classMode=True
             print('Class mode selected')
@@ -4190,6 +4477,17 @@ class AnnotatorJ(QWidget):
 
     def showOverlay(self,state):
         overlayLayer=self.findROIlayer(layerName='overlay')
+
+        # try to find an already opened image and use it
+        foundit=self.findOpenedImage(initSrc=self.chkShowOverlay)
+        if not foundit:
+            warnings.warn('Use Open to select an image in a folder first')
+            self.showOvl=False
+            return
+        else:
+            # good to go
+            pass
+
         if state == Qt.Checked:
             self.showOvl=True
             print('Show overlay selected')
@@ -4219,7 +4517,14 @@ class AnnotatorJ(QWidget):
     def setOverlay(self):
         # browse an ImageJ ROI zip file as an 'overlay' (actually also a shapes layer in napari)
         if not self.started or (self.findImageLayer() is None or self.findImageLayer().data is None):
-            warnings.warn('Open an image and annotate it first')
+            # try to find an already opened image and use it
+            foundit=self.findOpenedImage()
+            if not foundit:
+                warnings.warn('Open an image and annotate it first')
+                return
+            else:
+                # good to go
+                pass
             return
 
         # check if we have annotations in the list before loading anything to it
@@ -4307,6 +4612,7 @@ class AnnotatorJ(QWidget):
         self.prevSelectedClass=deepcopy(self.selectedClass)
 
         self.classSelectionDialog=QDialog()
+        self.classSelectionDialog.setStyleSheet(get_stylesheet("dark"))
         self.classSelectionDialog.setModal(True)
         self.classSelectionDialog.setWindowTitle('Select class')
 
@@ -4590,6 +4896,22 @@ class AnnotatorJ(QWidget):
             self.firstDockWidget=None
             self.firstDockWidgetName=None
             print('Resetting firstDockWidgetName to None')
+
+
+    # listeners for layer events
+    def layerInserted(self):
+        print('new layer inserted')
+        print(self.viewer.layers)
+
+
+    def layerRemoved(self):
+        print('existing layer removed')
+        print(self.viewer.layers)
+
+
+    def layerReordered(self):
+        print('layers reordered')
+        print(self.viewer.layers)
             
 
 
@@ -5439,6 +5761,9 @@ class ColourSelector(QWidget):
             self.updateROIcolours(0)
             self.updateROIcolours(1)
 
+            # write all settings to file
+            self.annotatorjObj.writeParams2File()
+
             # also destroy the widget
             self.closeWidget()
 
@@ -6085,6 +6410,7 @@ class ExportFrame(QWidget):
                             self.annotNames.append(self.curROIList[self.multipleList[e]])
 
                         self.annotNameChooserDialog=QDialog()
+                        self.annotNameChooserDialog.setStyleSheet(get_stylesheet("dark"))
                         self.annotNameChooserDialog.setModal(True)
                         self.annotNameChooserDialog.setWindowTitle('Multiple instances found')
 
