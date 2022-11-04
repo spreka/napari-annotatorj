@@ -173,6 +173,8 @@ class AnnotatorJ(QWidget):
         self.saveOutlines=False
         self.saveAnnotTimes=False
 
+        self.showHelpOnStartup=False
+
         # read options from file if exists
         self.params=None
         self.initParams()
@@ -184,6 +186,7 @@ class AnnotatorJ(QWidget):
         self.coloursWidget=None
         self.classesWidget=None
         self.ExportWidget=None
+        self.helpWidget=None
 
 
         # get a list of the 9 basic colours also present in AnnotatorJ's class mode
@@ -216,6 +219,14 @@ class AnnotatorJ(QWidget):
         self.btnOverlay.setToolTip('Load an annotation<br>file as overlay')
         self.btnOverlay.clicked.connect(self.setOverlay)
 
+        self.btnTrain = QPushButton('Train')
+        self.btnTrain.setToolTip('Train a model')
+        self.btnTrain.clicked.connect(self.openTrainWidget)
+
+        self.btn3D = QPushButton('3D')
+        self.btn3D.setToolTip('Annotate 3D images')
+        self.btn3D.clicked.connect(self.open3DWidget)
+
         # quick export
         self.btnExport = QPushButton('[^]')
         self.btnExport.setToolTip('Quick export<br>annotations')
@@ -240,6 +251,10 @@ class AnnotatorJ(QWidget):
         self.btnColours=QPushButton('Colours')
         self.btnColours.setToolTip('Set colour<br>for annotations<br>or overlay')
         self.btnColours.clicked.connect(self.addColourWidget)
+
+        self.btnHelp=QPushButton('?')
+        self.btnHelp.setToolTip('Help')
+        self.btnHelp.clicked.connect(self.openHelpWidgetDock)
 
         # checkboxes
         # edit mode
@@ -301,11 +316,14 @@ class AnnotatorJ(QWidget):
         self.btnSave.setStyleSheet(f"max-width: {self.bsize2}px")
         self.btnExport.setStyleSheet(f"max-width: {self.bsize2}px")
         self.btnOverlay.setStyleSheet(f"max-width: {self.bsize2}px")
+        self.btnTrain.setStyleSheet(f"max-width: {self.bsize2}px")
+        self.btn3D.setStyleSheet(f"max-width: {self.bsize2}px")
         self.buttonPrev.setStyleSheet(f"min-width: {int(self.bsize2/2)}px;")
         self.buttonNext.setStyleSheet(f"min-width: {int(self.bsize2/2)}px;")
         self.buttonOptions.setStyleSheet(f"max-width: {self.bsize2}px")
         self.btnColours.setStyleSheet(f"max-width: {self.bsize2}px")
         self.lblCurrentFile.setStyleSheet(f"width: {labelsize}px")
+        self.btnHelp.setStyleSheet(f"min-width: {int(self.bsize2/2)}px;")
 
         # set layouts
         self.mainVbox=QVBoxLayout()
@@ -322,6 +340,7 @@ class AnnotatorJ(QWidget):
         self.hBoxRight=QHBoxLayout()
         self.vBoxRightReal=QVBoxLayout()
         self.vBoxRightDummy=QVBoxLayout()
+        self.hBoxHelp=QHBoxLayout()
 
         self.hBoxLogo.addWidget(self.logo)
         self.hBoxTitle.addWidget(self.roiLabel)
@@ -353,6 +372,8 @@ class AnnotatorJ(QWidget):
         self.vBoxRightReal.addWidget(self.btnLoad)
         self.vBoxRightReal.addWidget(self.btnSave)
         self.vBoxRightReal.addWidget(self.btnOverlay)
+        self.vBoxRightReal.addWidget(self.btnTrain)
+        self.vBoxRightReal.addWidget(self.btn3D)
 
         self.hBoxDownInnerLeft.addWidget(self.lblCurrentFile)
         self.hBoxDownInnerRight.addWidget(self.buttonPrev)
@@ -365,7 +386,10 @@ class AnnotatorJ(QWidget):
 
         self.vBoxDown.addWidget(self.buttonOptions)
         self.vBoxDown.addWidget(self.btnColours)
+        self.hBoxHelp.addWidget(self.btnHelp)
+        self.hBoxHelp.setAlignment(Qt.AlignRight)
         self.vBoxDownCont.setAlignment(Qt.AlignBottom)
+        self.vBoxDownCont.addLayout(self.hBoxHelp)
         self.vBoxDownCont.addLayout(self.hBoxDown)
 
         self.hBoxDownCont.setAlignment(Qt.AlignBottom)
@@ -399,6 +423,10 @@ class AnnotatorJ(QWidget):
         print('----------------------------\nAnnotatorJ plugin is started\nHappy annotations!\n----------------------------')
 
         self.startUnet()
+
+        # show help if not opted out
+        if self.showHelpOnStartup:
+            self.openHelpWidgetDock()
 
     def openNew(self):
         # temporarily open a test image
@@ -672,6 +700,7 @@ class AnnotatorJ(QWidget):
 
         # add non layer-specific shortcuts here
         layer.bind_key('o',func=self.showOptionsWidget,overwrite=True)
+        layer.bind_key('h',func=self.showHelpWidget,overwrite=True)
         layer.bind_key('Shift-v',func=self.toggleShowContours,overwrite=True)
 
 
@@ -1836,7 +1865,8 @@ class AnnotatorJ(QWidget):
                 'enableTextLoad':self.enableTextLoad,
                 'loadOrOverlay':self.loadOrOverlay,
                 'saveOutlines':self.saveOutlines,
-                'gpuSetting':self.gpuSetting
+                'gpuSetting':self.gpuSetting,
+                'showHelp':self.showHelpOnStartup
             }
 
         if setParams:
@@ -1904,6 +1934,8 @@ class AnnotatorJ(QWidget):
             self.saveOutlines=params['saveOutlines']
         if 'gpuSetting' in params:
             self.gpuSetting=params['gpuSetting']
+        if 'showHelp' in params:
+            self.showHelpOnStartup=params['showHelp']
         return
 
 
@@ -4885,6 +4917,8 @@ class AnnotatorJ(QWidget):
                 self.firstDockWidget=self.optionsWidget
             elif newName=='Colours':
                 self.firstDockWidget=self.coloursWidget
+            elif newName=='Help':
+                self.firstDockWidget=self.helpWidget
             elif newName=='Export' or newName=='napari-annotatorj: AnnotatorJExport':
                 # this should never happen
                 self.firstDockWidget=self.ExportWidget
@@ -4896,6 +4930,25 @@ class AnnotatorJ(QWidget):
             self.firstDockWidget=None
             self.firstDockWidgetName=None
             print('Resetting firstDockWidgetName to None')
+
+
+    def openHelpWidgetDock(self):
+        self.helpWidget=HelpWidget(self.viewer,self)
+
+
+    def showHelpWidget(self,layer):
+        if self.helpWidget is None:
+            self.openHelpWidgetDock()
+        else:
+            self.helpWidget.closeWidget()
+
+
+    def openTrainWidget(self):
+        self.trainWidget=TrainWidget(self.viewer,self)
+
+
+    def open3DWidget(self):
+        return
 
 
     # listeners for layer events
@@ -7588,6 +7641,11 @@ class OptionsFrame(QWidget):
         self.saveOutlinesChkBx.setChecked(self.annotatorjObj.saveOutlines)
         self.saveOutlinesChkBx.stateChanged.connect(self.setSaveOutlines)
 
+        self.showHelpChkbx=QCheckBox('Show help on startup')
+        self.showHelpChkbx.setToolTip('Show help widget on each startup')
+        self.showHelpChkbx.setChecked(self.annotatorjObj.showHelpOnStartup)
+        self.showHelpChkbx.stateChanged.connect(self.setShowHelp)
+
         self.basicOptionsLabel=QLabel('Basic settings')
         self.advancedOptionsLabel=QLabel('Advanced settings')
         self.advancedOptionsLabel.setToolTip('Settings for advanced users')
@@ -7637,6 +7695,7 @@ class OptionsFrame(QWidget):
         self.modelWeightsHBox=QHBoxLayout()
         self.deviceHBox=QHBoxLayout()
         self.outlinesHBox=QHBoxLayout()
+        self.helpHBox=QHBoxLayout()
         self.timesHBox=QHBoxLayout()
         self.importVBox=QVBoxLayout()
         self.importHBox=QHBoxLayout()
@@ -7729,6 +7788,7 @@ class OptionsFrame(QWidget):
 
         # extra options
         self.outlinesHBox.addWidget(self.saveOutlinesChkBx)
+        self.helpHBox.addWidget(self.showHelpChkbx)
         self.timesHBox.addWidget(self.saveAnnotTimesChkBx)
 
         # main layout
@@ -7752,6 +7812,7 @@ class OptionsFrame(QWidget):
         self.advancedVBox.addLayout(self.importVBox)
         self.advancedVBox.addWidget(self.extraSeparator)
         self.advancedVBox.addLayout(self.outlinesHBox)
+        self.advancedVBox.addLayout(self.helpHBox)
         self.advancedVBox.addLayout(self.timesHBox)
 
         self.optionsMainVbox.addWidget(self.titleLabel)
@@ -7832,6 +7893,7 @@ class OptionsFrame(QWidget):
         self.setEnableTextLoadOpt()
         self.setImportMethod()
         self.setSaveOutlinesOpt()
+        self.setShowHelpOpt()
         # write all settings to file
         self.annotatorjObj.writeParams2File()
         self.closeWidget()
@@ -8263,6 +8325,13 @@ class OptionsFrame(QWidget):
             print('Cleared Save outlines')
 
 
+    def setShowHelp(self,state):
+        if state==Qt.Checked:
+            print('Selected Show help')
+        else:
+            print('Cleared Show help')
+
+
     def deviceChanged(self):
         rbtn=self.sender()
         if rbtn.isChecked()==True:
@@ -8278,6 +8347,10 @@ class OptionsFrame(QWidget):
 
     def setSaveOutlinesOpt(self):
         self.annotatorjObj.saveOutlines=True if self.saveOutlinesChkBx.isChecked() else False
+
+
+    def setShowHelpOpt(self):
+        self.annotatorjObj.showHelpOnStartup=True if self.showHelpChkbx.isChecked() else False
 
 
     def createLineSeparator(self,width=1,colour='gray'):
@@ -8312,6 +8385,113 @@ class OptionsFrame(QWidget):
 
 # -------------------------------------
 # end of class OptionsFrame
+# -------------------------------------
+
+
+class HelpWidget(QWidget):
+    def __init__(self,napari_viewer,annotatorjObj=None):
+        super().__init__()
+        self.viewer = napari_viewer
+        self.annotatorjObj=annotatorjObj
+
+        # check if there is opened instance of this frame
+        # the main plugin is: 'napari-annotatorj: Annotator J'
+        if self.annotatorjObj is not None and self.annotatorjObj.helpWidget is not None:
+            # already inited once, load again
+            print('detected that Help widget has already been initialized')
+            if self.annotatorjObj.helpWidget.isVisible() or 'Help' in self.viewer.window._dock_widgets.data:
+                print('Help widget is visible')
+                if 'Help' not in self.viewer.window._dock_widgets.data or 'napari-annotatorj: Help' not in self.viewer.window._dock_widgets.data:
+                    # rebuild the widget
+                    pass
+                else:
+                    return
+            else:
+                print('Help widget is not visible')
+                # rebuild the widget
+
+        vBoxLayout=QVBoxLayout()
+
+        # checkbox to don't show help on startup of the plugin
+        self.chkbxShowOnStartup=QCheckBox('Don\'t show on startup')
+        self.chkbxShowOnStartup.setToolTip('Don\'t show this window<br>on the next start of<br>napari-annotatorj')
+        self.chkbxShowOnStartup.setChecked(not self.annotatorjObj.showHelpOnStartup)
+        self.chkbxShowOnStartup.clicked.connect(self.setShowHelpOnStartup)
+
+        # rest of the help content with images
+        # TODO
+        lblWelcome=QLabel('Happy annotations!')
+
+        lblLinks=QLabel()
+        lblLinks.setOpenExternalLinks(True)
+        lblLinks.setText('Links to resources:<br>'+
+            '<a style="color:white;" href="https://github.com/spreka/napari-annotatorj#napari-annotatorj">Docs</a> | '+
+            '<a style="color:white;" href="https://github.com/spreka/napari-annotatorj">Source code</a> | '+
+            '<a style="color:white;" href="https://www.napari-hub.org/plugins/napari-annotatorj">napari-hub</a> | '+
+            '<a style="color:white;" href="https://github.com/spreka/napari-annotatorj#how-to-annotate">How to annotate</a><br>')
+
+        lblContAssist=QLabel()
+        lblContAssist.setOpenExternalLinks(True)
+        lblContAssist.setText('<a style="color:white;" href="https://github.com/spreka/napari-annotatorj#contour-assist-mode">Contour assist mode usage:</a><br>'+
+            '1. draw an initial contour<br>'+
+            '2. wait until the suggested contour is shown as selection<br>'+
+            '3. edit the contour by the brush selection tool (activated automatically), erase holding \'Alt\'<br>'+
+            '4. accept or reject it with either of the keys below<br><br>'+
+            'Suggested contours can be manipulated by keys:<br>\'q\':\taccept and add to ROI list<br>'+
+            'Ctrl+\'delete\':\treject and delete current suggested contour<br>'+
+            '\'u\' (only for U-Net method):\tinverts the current suggestion around the object<br><br>'+
+            'If no model is loaded on startup, see \'<b>...</b>\' (options) and browse a valid model file<br>')
+
+        lblTrain=QLabel()
+        lblTrain.setOpenExternalLinks(True)
+        lblTrain.setText('To <a style="color:white;" href="https://github.com/spreka/napari-annotatorj">train</a> a new model (refine current model):<br>'+
+            '1. annotate all objects on the current image<br>'+
+            '2. click \'Train\' --> opens train widget<br>'+
+            '3. set training parameters (optionally browse additional training data)<br>'+
+            '4. start training<br>')
+
+        lbl3D=QLabel()
+        lbl3D.setOpenExternalLinks(True)
+        lbl3D.setText('For 3D annotation see <a style="color:white;" href="https://github.com/bauerdavid/napari-nD-annotator">napari-nD-annotator</a> by Dávid Bauer<br>')
+
+        vBoxLayout.addWidget(lblWelcome)
+        vBoxLayout.addWidget(lblLinks)
+        vBoxLayout.addWidget(lblContAssist)
+        vBoxLayout.addWidget(lblTrain)
+        vBoxLayout.addWidget(lbl3D)
+        vBoxLayout.addWidget(self.chkbxShowOnStartup)
+
+        self.setLayout(vBoxLayout)
+
+        if self.annotatorjObj is not None:
+            dw=self.viewer.window.add_dock_widget(self,name='Help',area='right',allowed_areas=['right','bottom'])
+            dw.setFloating(True)
+            #self.show()
+
+
+    def setShowHelpOnStartup(self):
+        self.annotatorjObj.showHelpOnStartup=not self.chkbxShowOnStartup.isChecked()
+        print(f'Opted to {"show" if self.annotatorjObj.showHelpOnStartup else "not show"} help on next startup')
+        self.annotatorjObj.writeParams2File()
+
+
+    def closeWidget(self):
+        if self.annotatorjObj.helpWidget is not None:
+            try:       
+                self.viewer.window.remove_dock_widget(self.annotatorjObj.helpWidget)
+                self.annotatorjObj.helpWidget=None
+            except Exception as e:
+                print(e)
+                try:
+                    self.viewer.window.remove_dock_widget('Help')
+                    self.annotatorjObj.helpWidget=None
+                except Exception as e:
+                    print(e)
+                    print('Failed to remove widget named help')
+
+
+# -------------------------------------
+# end of class HelpWidget
 # -------------------------------------
 
 
