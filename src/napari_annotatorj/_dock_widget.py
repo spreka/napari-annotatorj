@@ -7,7 +7,7 @@ see: https://napari.org/docs/dev/plugins/hook_specifications.html
 Replace code below according to your needs.
 """
 from time import sleep
-from qtpy.QtWidgets import QWidget, QHBoxLayout,QVBoxLayout, QPushButton, QCheckBox,QLabel,QMessageBox,QFileDialog,QDialog,QComboBox,QListWidget,QAbstractItemView,QLineEdit,QMenu,QRadioButton,QSlider,QFrame,QScrollArea,QButtonGroup
+from qtpy.QtWidgets import QWidget, QHBoxLayout,QVBoxLayout, QPushButton, QCheckBox,QLabel,QMessageBox,QFileDialog,QDialog,QComboBox,QListWidget,QAbstractItemView,QLineEdit,QMenu,QRadioButton,QSlider,QFrame,QScrollArea,QButtonGroup,QTextEdit
 from magicgui import magic_factory
 
 import os
@@ -114,6 +114,7 @@ class AnnotatorJ(QWidget):
         self.curPredictionImage=None
         self.curPredictionImageName=None
         self.curOrigImage=None
+        self.allowContAssistBbox=False
         # '0' is the default GPU if any, otherwise fall back to cpu
         # valid values are: ['cpu','0','1','2',...]
         self.gpuSetting='cpu'
@@ -187,6 +188,8 @@ class AnnotatorJ(QWidget):
         self.classesWidget=None
         self.ExportWidget=None
         self.helpWidget=None
+        self.trainWidget=None
+        self.q3dWidget=None
 
 
         # get a list of the 9 basic colours also present in AnnotatorJ's class mode
@@ -2950,9 +2953,20 @@ class AnnotatorJ(QWidget):
             roiLayer.selected_data.pop()
         roiLayer.mode='add_polygon'
 
-        contAssistLayer=self.addContAssistLayer()
-        self.addFreeROIdrawingCA(shapesLayer=contAssistLayer)
-        contAssistLayer.mode='add_polygon'
+        #contAssistLayer=self.addContAssistLayer()
+        #self.addFreeROIdrawingCA(shapesLayer=contAssistLayer)
+        #contAssistLayer.mode='add_polygon'
+        if not (self.trainWidget is not None and self.trainWidget.trainedUNetModelNew is not None):
+            # normal contassist mode
+            contAssistLayer=self.addContAssistLayer()
+            self.addFreeROIdrawingCA(shapesLayer=contAssistLayer)
+            contAssistLayer.mode='add_polygon'
+        else:
+            # testing new trained model with bboxes
+            contAssistLayer=self.addContAssistLayer()
+            contAssistLayer.mode='add_rectangle'
+            contAssistLayer.mouse_drag_callbacks.append(self.addedNewBBox4UnetPred)
+            contAssistLayer.mouse_drag_callbacks.append(self.editROI)
 
         # bring the ROI layer forward
         self.viewer.layers.selection.add(contAssistLayer)
@@ -2975,9 +2989,12 @@ class AnnotatorJ(QWidget):
             warnings.warn(msg)
             return
         elif roiLayer.mode!='add_polygon' and not self.inAssisting:
-            msg='Cannot start contour assist. Please select {}'.format('\'Add polygons(P)\'')
-            warnings.warn(msg)
-            return
+            if roiLayer.mode=='add_rectangle' and not self.inAssisting and self.allowContAssistBbox:
+                print('Using bboxes in Contour assist mode')
+            else:
+                msg='Cannot start contour assist. Please select {}'.format('\'Add polygons(P)\'')
+                warnings.warn(msg)
+                return
         elif self.inAssisting:
             # do nothing on mouse release
             print('---- already inAssisting ----')
@@ -3037,16 +3054,21 @@ class AnnotatorJ(QWidget):
                             # model doesn't exist in the located folder
                             print('Cannot find model in Contour assist init')
                         
-                    # prepare the ROI as a cv2 contour
-                    labels=roiLayer.to_labels([s[0], s[1]]) # was labels
-                    # convert to labels layer
-                    #labelLayer = self.viewer.add_labels(labels, name='tmp')
-                    #curROIdata=labelLayer.data
-                    #self.viewer.layers.remove(labelLayer)
-                    curROIdata,hierarchy=cv2.findContours(labels.astype(numpy.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                    if roiLayer.mode=='add_polygon':
+                        # prepare the ROI as a cv2 contour
+                        labels=roiLayer.to_labels([s[0], s[1]]) # was labels
+                        # convert to labels layer
+                        #labelLayer = self.viewer.add_labels(labels, name='tmp')
+                        #curROIdata=labelLayer.data
+                        #self.viewer.layers.remove(labelLayer)
+                        curROIdata,hierarchy=cv2.findContours(labels.astype(numpy.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                        objMode=0 # polygons
+                    elif roiLayer.mode=='add_rectangle':
+                        curROIdata=[curROI]
+                        objMode=1 # bboxes
                     # delete temp init roi
                     roiLayer.data=[]
-                    newROI=self.contourAssistUNet(imageLayer.data,curROI,curROIdata[0],self.intensityThreshVal,self.distanceThreshVal,jsonFileName,modelFileName)
+                    newROI=self.contourAssistUNet(imageLayer.data,curROI,curROIdata[0],self.intensityThreshVal,self.distanceThreshVal,jsonFileName,modelFileName,objMode)
                 elif self.selectedCorrMethod==1:
                     # region growing
                     # debug:
@@ -3067,7 +3089,12 @@ class AnnotatorJ(QWidget):
                 self.cleanUpAfterContAssist(None,roiLayer)
             else:
                 # display this contour
-                roiLayer.add_polygons(newROI)
+                try:
+                    roiLayer.add_polygons(newROI)
+                except Exception as ex:
+                    print(ex)
+                    self.invertedROI=None
+                    raise(ex)
 
                 # succeeded, nothing else to do
                 print('Showing suggested contour')
@@ -3596,7 +3623,7 @@ class AnnotatorJ(QWidget):
 
 
     # contour assist using U-Net
-    def contourAssistUNet(self,imp,initROI,initROIdata,intensityThresh,distanceThresh,modelJsonFile,modelWeightsFile):
+    def contourAssistUNet(self,imp,initROI,initROIdata,intensityThresh,distanceThresh,modelJsonFile,modelWeightsFile,objectMode):
         assistedROI=None
         self.invertedROI=None
         self.ROIpositionX=0
@@ -3638,7 +3665,17 @@ class AnnotatorJ(QWidget):
 
         # get the bounding box of the current roi
         initBbox=[]
-        x,y,w,h=cv2.boundingRect(initROIdata) # how to add this bbox: rect=shapes.add_rectangles([[y,x],[y+h,x+w]])
+        if not self.allowContAssistBbox or objectMode==0:
+            x,y,w,h=cv2.boundingRect(initROIdata) # how to add this bbox: rect=shapes.add_rectangles([[y,x],[y+h,x+w]])
+        else:
+            x=int(initROIdata[0][0])
+            y=int(initROIdata[0][1])
+            w=abs(int(initROIdata[1][1]-initROIdata[0][1]))
+            h=abs(int(initROIdata[2][0]-initROIdata[0][0]))
+            # swap coords
+            tmp=x
+            x=copy(y)
+            y=copy(tmp)
         initBbox.append(x)
         initBbox.append(y)
         initBbox.append(w)
@@ -3801,6 +3838,13 @@ class AnnotatorJ(QWidget):
         # -------- here we have a valid prediction image and file name
 
 
+        # crop around bbox and contour creation moved to a separate fcn
+        assistedROI=self.finishUnetPred(maskImage,tmpBbox,assistedROI)
+
+        return assistedROI
+
+
+    def finishUnetPred(self,maskImage,tmpBbox,assistedROI):
         # crop initROI + distanceTresh pixels bbox of the predmask
         #cropMask=maskImage.data[x:x+w,y:y+h]
         #cropMask=maskImage.data[y:y+h,x:x+w]
@@ -4119,6 +4163,84 @@ class AnnotatorJ(QWidget):
             shapesLayer2.bind_key('a',func=self.toggleContAssistMode,overwrite=True)
             shapesLayer2.bind_key('Shift-v',func=self.toggleShowContours,overwrite=True)
             return shapesLayer2
+
+
+    def drawBboxPop(self):
+        self.chckbxContourAssist.setChecked(True)
+        initContAssistLayer=self.findROIlayer(layerName='contourAssist')
+        if initContAssistLayer is not None:
+            self.viewer.layers.remove(initContAssistLayer)
+        roiLayer=self.addContAssistLayer()
+        # switch to bbox tool and prompt to draw one then return its coords
+        curLayer=self.viewer.layers.selection.active
+        if curLayer.__class__ is Image:
+            # select the ROI shapes layer
+            self.viewer.layers.selection.clear()
+            roiLayer=self.findROIlayer(layerName='contourAssist')
+            if roiLayer is not None:
+                self.viewer.layers.selection.add(roiLayer)
+            else:
+                print('no contourAssist layer in the layer list')
+                return None
+        curLayer=self.viewer.layers.selection.active
+        if curLayer.__class__ is Shapes:
+            # on a shapes layer
+            curLayer.mode='add_rectangle'
+            curShapeNum=len(curLayer.data)
+
+            drawBboxPopup=QDialog()
+            drawBboxPopup.setModal(True)
+            drawBboxPopup.setWindowTitle('Draw a bounding box')
+            lblGuide=QLabel('Draw a bbox where you would like to<br>see a prediction with your new model<br>Press "Esc" to continue')
+            layout=QVBoxLayout()
+            layout.addWidget(lblGuide)
+            drawBboxPopup.setLayout(layout)
+            drawBboxPopup.show()
+            drawBboxPopup.exec()
+
+            # wait for the user to draw a bbox
+            self.allowContAssistBbox=True
+            curLayer.mouse_drag_callbacks.append(self.addedNewBBox4UnetPred)
+
+            #if drawBboxPopup is not None:
+            #    drawBboxPopup.done(1)
+
+            return True
+
+        else:
+            print('activate a Shapes layer to continue')
+        # TODO
+        return None
+
+
+    def addedNewBBox4UnetPred(self,layer,event):
+        yield
+        if layer.mode=='add_rectangle':
+            dragged=False
+            # on move
+            while event.type == 'mouse_move':
+                dragged = True
+                yield
+            # on release
+            if dragged:
+                # drag ended
+
+                # convert bbox coords to ints
+                newBbox=layer.data[-1]
+                for ni,n in enumerate(newBbox):
+                    for mi,m in enumerate(n):
+                        newBbox[ni,mi]=int(newBbox[ni,mi])
+                    #n=int(n)
+                    newBbox=newBbox.astype('uint16')
+                layer.data[-1]=newBbox
+
+                print(f'starting contAssistROI on drawn bbox {newBbox}')
+                self.contAssistROI()
+
+
+    def contourAssist(self,imageData,curROI,intensityThreshVal,distanceThreshVal):
+        # TODO
+        return None
 
 
     def classifyROI(self,layer,event):
@@ -4919,6 +5041,10 @@ class AnnotatorJ(QWidget):
                 self.firstDockWidget=self.coloursWidget
             elif newName=='Help':
                 self.firstDockWidget=self.helpWidget
+            elif newName=='Train':
+                self.firstDockWidget=self.trainWidget
+            elif newName=='3D':
+                self.firstDockWidget=self.q3dWidget
             elif newName=='Export' or newName=='napari-annotatorj: AnnotatorJExport':
                 # this should never happen
                 self.firstDockWidget=self.ExportWidget
@@ -4948,7 +5074,7 @@ class AnnotatorJ(QWidget):
 
 
     def open3DWidget(self):
-        return
+        self.q3dWidget=Q3DWidget(self.viewer,self)
 
 
     # listeners for layer events
@@ -8487,11 +8613,645 @@ class HelpWidget(QWidget):
                     self.annotatorjObj.helpWidget=None
                 except Exception as e:
                     print(e)
-                    print('Failed to remove widget named help')
+                    print('Failed to remove widget named Help')
 
 
 # -------------------------------------
 # end of class HelpWidget
+# -------------------------------------
+
+
+class TrainWidget(QWidget):
+    def __init__(self,napari_viewer,annotatorjObj=None):
+        super().__init__()
+        self.viewer = napari_viewer
+        self.annotatorjObj=annotatorjObj
+
+        # check if there is opened instance of this frame
+        # the main plugin is: 'napari-annotatorj: Annotator J'
+        if self.annotatorjObj is not None and self.annotatorjObj.trainWidget is not None:
+            # already inited once, load again
+            print('detected that Train widget has already been initialized')
+            if self.annotatorjObj.trainWidget.isVisible() or 'Train' in self.viewer.window._dock_widgets.data:
+                print('Train widget is visible')
+                return
+            else:
+                print('Train widget is not visible')
+                # rebuild the widget
+
+        self.mainVbox=QVBoxLayout()
+        self.browseHBox=QHBoxLayout()
+        self.browseFieldVBox=QVBoxLayout()
+        self.browseBtnVBox=QVBoxLayout()
+        self.trainBtnHBox=QHBoxLayout()
+
+        #self.lblWarn=QLabel('Make sure you annotated all<br>objects on the current image')
+        self.chkbxUseCurrent=QCheckBox('Use current annot')
+        self.chkbxUseCurrent.setToolTip('Use current annotation<br>in training')
+        isCurrentAnnotated=self.isCurrentImageAnnotated()
+        self.chkbxUseCurrent.setChecked(isCurrentAnnotated)
+        #if not isCurrentAnnotated:
+            #self.lblWarn.setText('')
+
+        self.lblData=QLabel('Add train data: ')
+        self.lblData.setToolTip('Browse additional training data')
+
+        # browse buttons
+        self.btnBrowseImages=QPushButton('Browse original ...')
+        self.btnBrowseImages.setToolTip('Browse folder of original images')
+        self.btnBrowseImages.clicked.connect(self.browseImageDataFolder)
+        self.btnBrowseAnnots=QPushButton('Browse annot ...')
+        self.btnBrowseAnnots.setToolTip('Browse folder of annotation files')
+        self.btnBrowseAnnots.clicked.connect(self.browseAnnotDataFolder)
+        self.btnBrowsePrep=QPushButton('Browse train ...')
+        self.btnBrowsePrep.setToolTip('Browse folder of prepared training data')
+        self.btnBrowsePrep.clicked.connect(self.browsePrepDataFolder)
+
+        # text fields
+        self.imageDataLine=QLineEdit()
+        self.imageDataLine.setToolTip('Original images folder')
+        self.imageDataLine.editingFinished.connect(self.setImageDataFolder)
+        self.annotDataLine=QLineEdit()
+        self.annotDataLine.setToolTip('Annotation folder')
+        self.annotDataLine.editingFinished.connect(self.setAnnotDataFolder)
+        self.prepDataLine=QLineEdit()
+        self.prepDataLine.setToolTip('Prepared training data folder')
+        self.prepDataLine.editingFinished.connect(self.setPrepDataFolder)
+
+        # train buttons
+        self.btnTrain=QPushButton('Start')
+        self.btnTrain.setToolTip('Start training')
+        self.btnTrain.clicked.connect(self.startTraining)
+        
+        self.btnStop=QPushButton('Stop')
+        self.btnStop.setToolTip('Stop current training process')
+        self.btnStop.clicked.connect(self.stopTraining)
+
+        self.btnPrep=QPushButton('Prep data')
+        self.btnPrep.setToolTip('Prepare training data from original images and annotations')
+        self.btnPrep.clicked.connect(self.prepTraining)
+
+        self.btnTrain.setStyleSheet(f"min-width: {self.annotatorjObj.bsize2}px")
+        self.btnStop.setStyleSheet(f"min-width: {self.annotatorjObj.bsize2}px")
+        self.btnPrep.setStyleSheet(f"min-width: {self.annotatorjObj.bsize2}px")
+
+        self.browseFieldVBox.addWidget(self.imageDataLine)
+        self.browseFieldVBox.addWidget(self.annotDataLine)
+        self.browseFieldVBox.addWidget(self.prepDataLine)
+        self.browseBtnVBox.addWidget(self.btnBrowseImages)
+        self.browseBtnVBox.addWidget(self.btnBrowseAnnots)
+        self.browseBtnVBox.addWidget(self.btnBrowsePrep)
+        self.browseHBox.addLayout(self.browseFieldVBox)
+        self.browseHBox.addLayout(self.browseBtnVBox)
+
+        self.trainBtnHBox.setAlignment(Qt.AlignRight)
+        self.trainBtnHBox.addWidget(self.btnPrep)
+        self.trainBtnHBox.addWidget(self.btnTrain)
+        self.trainBtnHBox.addWidget(self.btnStop)
+
+        self.mainVbox.addWidget(self.chkbxUseCurrent)
+        #self.mainVbox.addWidget(self.lblWarn)
+        self.mainVbox.addWidget(self.lblData)
+        self.mainVbox.addLayout(self.browseHBox)
+        self.mainVbox.addLayout(self.trainBtnHBox)
+
+
+        self.setLayout(self.mainVbox)
+
+
+        # set vars
+        self.annotExsts=['.zip','.tiff','.tif']
+        self.originalFolder=None
+        self.annotationFolder=None
+        self.trainDataFolder=None
+        self.curFileList=None
+        self.curROIList=None
+        self.curExpList=None
+        self.startedOrig=False
+        self.startedROI=False
+        self.startedPrep=False
+        self.startedTrain=False
+        self.started=False
+
+        if self.annotatorjObj is not None:
+            dw=self.viewer.window.add_dock_widget(self,name='Train')
+            if self.annotatorjObj.firstDockWidget is None:
+                self.annotatorjObj.firstDockWidget=dw
+                self.annotatorjObj.trainWidget=dw
+                self.annotatorjObj.firstDockWidgetName='Train'
+            else:
+                try:
+                    self.viewer.window._qt_window.tabifyDockWidget(self.annotatorjObj.firstDockWidget,dw)
+                except Exception as e:
+                    print(e)
+                    # RuntimeError: wrapped C/C++ object of type QtViewerDockWidget has been deleted
+                    # try to reset the firstDockWidget manually
+                    self.annotatorjObj.findDockWidgets('Train')
+                    try:
+                        if self.annotatorjObj.firstDockWidget is None:
+                            self.annotatorjObj.firstDockWidget=dw
+                            self.annotatorjObj.firstDockWidgetName='Train'
+                        else:
+                            self.viewer.window._qt_window.tabifyDockWidget(self.annotatorjObj.firstDockWidget,dw)
+                    except Exception as e:
+                        print(e)
+                        print('Failed to add widget Train')
+
+
+    def isCurrentImageAnnotated(self):
+        if self.annotatorjObj is not None:
+            imageLayer=self.annotatorjObj.findImageLayerName(layerName='Image')
+            if imageLayer is not None:
+                roiLayer=self.annotatorjObj.findROIlayer()
+                if roiLayer is not None:
+                    # image and roi layer exist, check if empty
+                    # TODO
+                    if roiLayer.data is not None and len(roiLayer.data)>0:
+                        warnings.warn('Make sure you annotated all objects on the current image')
+                        return True
+                    else:
+                        warnings.warn('Current image has no annotations')
+                        return False
+                else:
+                    # no annotation layer, only image
+                    warnings.warn('Current image has no annotations')
+                    return False
+            else:
+                # no image layer opened
+                warnings.warn('No image opened')
+                return False
+        else:
+            warnings.warn('Cannot find image layer')
+            return False
+
+
+    def browseImageDataFolder(self):
+        # open folder dialog
+        self.originalFolder=QFileDialog.getExistingDirectory(
+                self,"Select original image folder",
+                self.annotatorjObj.defDir,QFileDialog.ShowDirsOnly)
+
+        print(self.originalFolder)
+        if os.path.isdir(self.originalFolder):
+            print('Opened original image folder: {}'.format(self.originalFolder))
+            self.imageDataLine.setText(self.originalFolder)
+        else:
+            print('Failed to open original image folder')
+            return
+
+        self.initializeImageFolderOpening(self.originalFolder)
+
+
+    def browseAnnotDataFolder(self):
+        # open folder dialog
+        self.annotationFolder=QFileDialog.getExistingDirectory(
+                self,"Select annotation folder",
+                self.annotatorjObj.defDir,QFileDialog.ShowDirsOnly)
+
+        print(self.annotationFolder)
+        if os.path.isdir(self.annotationFolder):
+            print('Opened annotation folder: {}'.format(self.annotationFolder))
+            self.annotDataLine.setText(self.annotationFolder)
+        else:
+            print('Failed to open annotation folder')
+            return
+
+        self.initializeAnnotFolderOpening(self.annotationFolder)
+
+
+    def browsePrepDataFolder(self):
+        # open folder dialog
+        self.trainDataFolder=QFileDialog.getExistingDirectory(
+                self,"Select training data folder",
+                self.annotatorjObj.defDir,QFileDialog.ShowDirsOnly)
+
+        print(self.trainDataFolder)
+        if os.path.isdir(self.trainDataFolder):
+            if os.path.isdir(os.path.join(self.trainDataFolder,'images')) and os.path.isdir(os.path.join(self.trainDataFolder,'unet_masks')):
+                print('Opened training data folder: {}'.format(self.trainDataFolder))
+                self.prepDataLine.setText(self.trainDataFolder)
+            else:
+                print('Training data folder must contain 2 subfolders: "images" for original images and "unet_masks" for exported annotations')
+                return
+        else:
+            print('Failed to open training data folder')
+            return
+
+        self.initializeTrainFolderOpening(self.trainDataFolder)
+
+
+    def setImageDataFolder(self):
+        self.originalFolder=self.imageDataLine.text()
+        if os.path.isdir(self.originalFolder):
+            print('Opened original image folder: {}'.format(self.originalFolder))
+        else:
+            print('Failed to open original image folder')
+            return
+        self.initializeImageFolderOpening(self.originalFolder)
+
+
+    def setAnnotDataFolder(self):
+        self.annotationFolder=self.annotDataLine.text()
+        if os.path.isdir(self.annotationFolder):
+            print('Opened annotation folder: {}'.format(self.annotationFolder))
+            self.annotDataLine.setText(self.annotationFolder)
+        else:
+            print('Failed to open annotation folder')
+            return
+        self.initializeAnnotFolderOpening(self.annotationFolder)
+
+
+    def setPrepDataFolder(self):
+        self.trainDataFolder=self.prepDataLine.text()
+        if os.path.isdir(self.trainDataFolder):
+            if os.path.isdir(os.path.join(self.trainDataFolder,'images')) and os.path.isdir(os.path.join(self.trainDataFolder,'unet_masks')):
+                print('Opened training data folder: {}'.format(self.trainDataFolder))
+                self.prepDataLine.setText(self.trainDataFolder)
+            else:
+                print('Training data folder must contain 2 subfolders: "images" for original images and "unet_masks" for exported annotations')
+                return
+        else:
+            print('Failed to open training data folder')
+            return
+        self.initializeTrainFolderOpening(self.trainDataFolder)
+
+
+    def initializeImageFolderOpening(self,originalFolder):
+        # get a list of files in the current directory
+        self.curFileList=[f for f in os.listdir(originalFolder) if os.path.isfile(os.path.join(originalFolder,f)) and os.path.splitext(f)[1] in self.annotatorjObj.imageExsts]
+        fileListCount=len(self.curFileList)
+
+        # check if there are correct files in the selected folder
+        if fileListCount<1:
+            print('No original image files found in current folder')
+            warnings.warn('Could not find original image files in selected folder')
+            self.started=False
+            return
+
+        print(f'Found {fileListCount} images in current folder')
+
+        self.startedOrig=True
+        if self.startedROI:
+            self.started=True
+
+        if self.startedOrig and self.startedROI:
+            self.prepDataLine.setEnabled(False)
+            self.btnBrowsePrep.setEnabled(False)
+            self.btnBrowsePrep.setStyleSheet(f"background-color: gray")
+
+
+    def initializeAnnotFolderOpening(self,annotationFolder):
+        # get a list of files in the current directory
+        listOfROIs=[f for f in os.listdir(annotationFolder) if os.path.isfile(os.path.join(annotationFolder,f)) and os.path.splitext(f)[1] in self.annotExsts]
+        ROIListCount=0
+        expListCount=0
+
+        # get number of useful files
+        validAnnotNameRegs=['_ROIs','_bboxes','_semantic','']
+        annotTypeDict={'_ROIs':0,'_bboxes':1,'_semantic':2,'':3}
+
+        self.curROIList=[]
+        self.curExpList=[]
+        for i in range(len(listOfROIs)):
+            # new, for any type of object we support
+            curFileName=listOfROIs[i]
+            if os.path.splitext(curFileName)[1] in self.annotExsts:
+                annotType=None
+                for v in validAnnotNameRegs:
+                    if v in curFileName:
+                        annotType=annotTypeDict.get(v)
+                        break
+                if annotType<3:
+                    # annotatorj annotation file, can export
+                    self.curROIList.append(curFileName)
+                    ROIListCount+=1
+                else:
+                    # already exported mask
+                    self.curExpList.append(curFileName)
+                    expListCount+=1
+
+
+        # check if there are correct files in the selected folder
+        if ROIListCount<1:
+            if expListCount<1:
+                print('No annotation files found in current folder')
+                warnings.warn('Could not find annotation files in selected folder')
+                self.started=False
+                return
+            else:
+                # can go on
+                pass
+
+        print(f'Found {ROIListCount} annotation files in current folder and {expListCount} exported annotation files')
+
+        self.startedROI=True
+        if self.startedOrig:
+            self.started=True
+
+        if self.startedOrig and self.startedROI:
+            self.prepDataLine.setEnabled(False)
+            self.btnBrowsePrep.setEnabled(False)
+            self.btnBrowsePrep.setStyleSheet(f"background-color: gray")
+
+
+    def initializeTrainFolderOpening(self,folder):
+        # TODO
+        if os.path.isdir(os.path.join(folder,'images')) and os.path.isdir(os.path.join(folder,'unet_masks')):
+            # subfolders exist, can go on
+
+            # get a list of files in the current directory
+            self.curFileList=[f for f in os.listdir(os.path.join(folder,'images')) if os.path.isfile(os.path.join(os.path.join(folder,'images'),f)) and os.path.splitext(f)[1] in self.annotatorjObj.imageExsts]
+            fileListCount=len(self.curFileList)
+
+            # check if there are correct files in the selected folder
+            if fileListCount<1:
+                print('No original image files found in current folder')
+                warnings.warn('Could not find original image files in selected folder')
+                self.started=False
+                return
+
+            print(f'Found {fileListCount} images in current folder')
+
+            # get a list of files in the current directory
+            listOfROIs=[f for f in os.listdir(os.path.join(folder,'unet_masks')) if os.path.isfile(os.path.join(os.path.join(folder,'unet_masks'),f)) and os.path.splitext(f)[1] in self.annotExsts]
+            ROIListCount=0
+
+            # get number of useful files
+
+            curROIList=[]
+            for i in range(len(listOfROIs)):
+                # new, for any type of object we support
+                curFileName=listOfROIs[i]
+                if os.path.splitext(curFileName)[1] in self.annotExsts:
+                    curROIList.append(curFileName)
+                    ROIListCount+=1
+
+            # check if there are correct files in the selected folder
+            if ROIListCount<1:
+                print('No annotation files found in current folder')
+                warnings.warn('Could not find annotation files in selected folder')
+                self.started=False
+                return
+
+            print(f'Found {ROIListCount} annotation files in current folder')
+
+            self.startedPrep=True
+
+        else:
+            print('Training data folder must contain 2 subfolders: "images" for original images and "masks" for exported annotations')
+            return
+
+
+    def prepTraining(self):
+        self.prepDataLine.setEnabled(False)
+        self.btnBrowsePrep.setEnabled(False)
+        self.btnBrowsePrep.setStyleSheet(f"background-color: gray")
+        # how to reset after enabled:
+        #self.btnBrowsePrep.setStyleSheet(get_stylesheet("dark"))
+        return
+
+
+    def startTraining(self):
+        if self.startedPrep:
+            # can start training
+            self.startUnetTrain()
+
+        else:
+            print('Training data not prepared yet')
+            return
+        return
+
+
+    @thread_worker(start_thread=False)
+    def startUnetTraining(self):
+        try:
+            from .predict_unet import trainIfNoModel,callPredictUnetLoadedNosetCustomSize,setGpu
+        except ImportError as e:
+            try:
+                from predict_unet import trainIfNoModel,callPredictUnetLoadedNosetCustomSize,setGpu
+            except Exception as e:
+                print(e)
+                return
+
+        # prep training args
+        from argparse import Namespace
+        args=Namespace()
+        args.model=os.path.join(self.trainDataFolder,'model','model_real')
+        args.train=self.trainDataFolder
+        args.batch=1
+        args.epochs=1
+        args.steps=10
+        args.gpu=self.annotatorjObj.gpuSetting
+        args.write=False
+        args.size=256
+        args.test=None
+        args.results=None
+        self.args=args
+
+        # train
+        setGpu(gpuSetting=str(args.gpu))
+        model=trainIfNoModel(args)
+        print(f'Finished training new model {args.model}')
+        return model
+
+
+    def setUnetModelTrain(self,model):
+        if model is not None:
+            self.trainedUNetModelNew=model
+            print('Successfully trained new U-Net model for contour correction')
+            self.testUnetTrain(args=self.args)
+        else:
+            print('>>>> Failed, model is None')
+
+
+    def startUnetTrain(self):
+        #from .predict_unet import callPredictUnet,callPredictUnetLoaded#,loadUnetModel
+        try:
+            threadWorker=self.startUnetTraining()
+            threadWorker.started.connect(lambda: print('>>>> Started training U-Net model...'))
+            threadWorker.returned.connect(lambda x: self.setUnetModelTrain(x))
+            threadWorker.start()
+        except Exception as e:
+            print(f'Could not train model')
+            print(e)
+            raise(e)
+
+
+    def testUnetTrain(self,args=None):
+        if args is None:
+            args=self.args
+        # test new model on a sample image
+        if self.annotatorjObj.findOpenedImage():
+            args.test=self.annotatorjObj.findImageLayer().data
+            self.annotatorjObj.curOrigImage=args.test
+        else:
+            # pop dialog to select a test image
+            # use the first training image instead for testing
+            args.test=os.path.join(self.trainDataFolder,'images',self.curFileList[0])
+            testImage=self.viewer.add_image(skimage.io.imread(args.test))
+            self.viewer.reset_view()
+            self.annotatorjObj.defFile=self.curFileList[0]
+            self.annotatorjObj.defDir=self.trainDataFolder,'images'
+            self.annotatorjObj.destNameRaw=args.test
+            self.annotatorjObj.curOrigImage=testImage.data
+
+        # check fcn import again
+        try:
+            from .predict_unet import callPredictUnetLoadedNosetCustomSize
+        except ImportError as e:
+            try:
+                from predict_unet import callPredictUnetLoadedNosetCustomSize
+            except Exception as e:
+                print(e)
+                return
+
+        preds=callPredictUnetLoadedNosetCustomSize(self.trainedUNetModelNew,args.test)
+        print(f'Finished test prediction with new model {args.model}')
+        if isinstance(preds,list):
+            pred=preds[0]
+        elif isinstance(preds,numpy.ndarray):
+            pred=preds
+        title=self.viewer.add_image(pred,name='checking_title')
+        titleIdx=self.viewer.layers.index(title)
+        self.viewer.layers.selection.clear()
+        self.viewer.layers.move_selected(titleIdx,0)
+        self.viewer.reset_view()
+
+        # from AnnotatorJ.contourAssistUNet fcn to finish prediction and turn it into a shape
+        print('  >> predicted image processed...')
+        tmpLayer=self.annotatorjObj.findImageLayerName(layerName='checking_title')
+        if tmpLayer is not None:
+            tmpLayer.visible=True
+
+        self.annotatorjObj.curPredictionImage=tmpLayer.data
+
+        # crop around bbox and contour creation moved to a separate fcn
+        self.annotatorjObj.drawBboxPop()
+
+
+    def stopTraining(self):
+        return
+
+
+    def closeWidget(self):
+        if self.annotatorjObj.trainWidget is not None:
+            try:       
+                self.viewer.window.remove_dock_widget(self.annotatorjObj.trainWidget)
+                self.annotatorjObj.trainWidget=None
+            except Exception as e:
+                print(e)
+                try:
+                    self.viewer.window.remove_dock_widget('Train')
+                    self.annotatorjObj.trainWidget=None
+                except Exception as e:
+                    print(e)
+                    print('Failed to remove widget named Train')
+
+
+    def closeEvent(self, event):
+        event.ignore()
+        self.closeWidget()
+        #event.accept()
+
+
+# -------------------------------------
+# end of class TrainWidget
+# -------------------------------------
+
+
+class Q3DWidget(QWidget):
+    def __init__(self,napari_viewer,annotatorjObj=None):
+        super().__init__()
+        self.viewer = napari_viewer
+        self.annotatorjObj=annotatorjObj
+
+        # check if there is opened instance of this frame
+        # the main plugin is: 'napari-annotatorj: Annotator J'
+        if self.annotatorjObj is not None and self.annotatorjObj.q3dWidget is not None:
+            # already inited once, load again
+            print('detected that 3D widget has already been initialized')
+            if self.annotatorjObj.q3dWidget.isVisible() or '3D' in self.viewer.window._dock_widgets.data:
+                print('3D widget is visible')
+                return
+            else:
+                print('3D widget is not visible')
+                # rebuild the widget
+
+        self.mainVbox=QVBoxLayout()
+        self.pipHBox=QHBoxLayout()
+
+        self.lblWarn=QLabel('3D annotation is available in <a style="color:white;" href="https://github.com/bauerdavid/napari-nD-annotator">napari-nD-annotator</a><br>created by Dávid Bauer.<br>You can install the plugin from the Plugins menu<br>(bundled application version) or via pip with:')
+        self.lblWarn.setOpenExternalLinks(True)
+
+        self.lblPipCmd=QTextEdit('pip install napari-nD-annotator')
+        self.lblPipCmd.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.lblPipCmd.setStyleSheet("font-family:Consolas;color:gray;")
+        # resize the text widget
+        self.lblPipCmd.document().setTextWidth(self.lblPipCmd.viewport().width())
+        margins = self.lblPipCmd.contentsMargins()
+        height = int(1.5*self.lblPipCmd.document().size().height() + margins.top() + margins.bottom())
+        self.lblPipCmd.setFixedHeight(height)
+
+        from napari._qt.dialogs.qt_about import QtCopyToClipboardButton
+        self.btnCopyPip=QtCopyToClipboardButton(self.lblPipCmd)
+        
+        self.pipHBox.addWidget(self.lblPipCmd)
+        self.pipHBox.addWidget(self.btnCopyPip)
+
+        self.mainVbox.addWidget(self.lblWarn)
+        self.mainVbox.addLayout(self.pipHBox)
+
+
+        self.setLayout(self.mainVbox)
+
+        if self.annotatorjObj is not None:
+            dw=self.viewer.window.add_dock_widget(self,name='3D')
+            if self.annotatorjObj.firstDockWidget is None:
+                self.annotatorjObj.firstDockWidget=dw
+                self.annotatorjObj.q3dWidget=dw
+                self.annotatorjObj.firstDockWidgetName='3D'
+            else:
+                try:
+                    self.viewer.window._qt_window.tabifyDockWidget(self.annotatorjObj.firstDockWidget,dw)
+                except Exception as e:
+                    print(e)
+                    # RuntimeError: wrapped C/C++ object of type QtViewerDockWidget has been deleted
+                    # try to reset the firstDockWidget manually
+                    self.annotatorjObj.findDockWidgets('3D')
+                    try:
+                        if self.annotatorjObj.firstDockWidget is None:
+                            self.annotatorjObj.firstDockWidget=dw
+                            self.annotatorjObj.firstDockWidgetName='3D'
+                        else:
+                            self.viewer.window._qt_window.tabifyDockWidget(self.annotatorjObj.firstDockWidget,dw)
+                    except Exception as e:
+                        print(e)
+                        print('Failed to add widget 3D')
+
+
+    def closeWidget(self):
+        if self.annotatorjObj.q3dWidget is not None:
+            try:       
+                self.viewer.window.remove_dock_widget(self.annotatorjObj.q3dWidget)
+                self.annotatorjObj.q3dWidget=None
+            except Exception as e:
+                print(e)
+                try:
+                    self.viewer.window.remove_dock_widget('3D')
+                    self.annotatorjObj.q3dWidget=None
+                except Exception as e:
+                    print(e)
+                    print('Failed to remove widget named 3D')
+
+
+    def closeEvent(self, event):
+        event.ignore()
+        self.closeWidget()
+        #event.accept()
+
+
+# -------------------------------------
+# end of class Q3DWidget
 # -------------------------------------
 
 
