@@ -114,7 +114,7 @@ class AnnotatorJ(QWidget):
         self.curPredictionImage=None
         self.curPredictionImageName=None
         self.curOrigImage=None
-        self.allowContAssistBbox=False
+        self.allowContAssistBbox=True
         # '0' is the default GPU if any, otherwise fall back to cpu
         # valid values are: ['cpu','0','1','2',...]
         self.gpuSetting='cpu'
@@ -2304,6 +2304,7 @@ class AnnotatorJ(QWidget):
             #shapesLayer.events.data.connect(self.contAssistROI,position='last')
             #shapesLayer.mouse_drag_callbacks.append(self.freeHandROI)
             shapesLayer.mouse_drag_callbacks.append(self.freeHandROIvis)
+            shapesLayer.mouse_drag_callbacks.append(self.addedNewBBox4UnetPred)
             shapesLayer.mouse_drag_callbacks.append(self.editROI)
         else:
             return
@@ -2952,21 +2953,15 @@ class AnnotatorJ(QWidget):
         if roiLayer.selected_data:
             roiLayer.selected_data.pop()
         roiLayer.mode='add_polygon'
-
-        #contAssistLayer=self.addContAssistLayer()
-        #self.addFreeROIdrawingCA(shapesLayer=contAssistLayer)
-        #contAssistLayer.mode='add_polygon'
-        if not (self.trainWidget is not None and self.trainWidget.trainedUNetModelNew is not None):
-            # normal contassist mode
-            contAssistLayer=self.addContAssistLayer()
-            self.addFreeROIdrawingCA(shapesLayer=contAssistLayer)
+        
+        contAssistLayer=self.addContAssistLayer()
+        self.addFreeROIdrawingCA(shapesLayer=contAssistLayer)
+        # allow bbox init if not disabled
+        if self.prevTool is not None:
+            contAssistLayer.mode=self.prevTool
+            self.prevTool=None
+        if not self.allowContAssistBbox:
             contAssistLayer.mode='add_polygon'
-        else:
-            # testing new trained model with bboxes
-            contAssistLayer=self.addContAssistLayer()
-            contAssistLayer.mode='add_rectangle'
-            contAssistLayer.mouse_drag_callbacks.append(self.addedNewBBox4UnetPred)
-            contAssistLayer.mouse_drag_callbacks.append(self.editROI)
 
         # bring the ROI layer forward
         self.viewer.layers.selection.add(contAssistLayer)
@@ -2982,6 +2977,8 @@ class AnnotatorJ(QWidget):
         if roiLayer is None:
             print('No ROI layer found for contour assist (contourAssist)')
             return
+        else:
+            self.prevTool=roiLayer.mode
 
         if roiLayer.mode=='select' and not self.inAssisting:
             msg='Cannot start contour assist when {} is selected. Please select {}'.format(
