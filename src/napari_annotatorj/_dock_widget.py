@@ -7,7 +7,8 @@ see: https://napari.org/docs/dev/plugins/hook_specifications.html
 Replace code below according to your needs.
 """
 from time import sleep
-from qtpy.QtWidgets import QWidget, QHBoxLayout,QVBoxLayout, QPushButton, QCheckBox,QLabel,QMessageBox,QFileDialog,QDialog,QComboBox,QListWidget,QAbstractItemView,QLineEdit,QMenu,QRadioButton,QSlider,QFrame,QScrollArea,QButtonGroup,QTextEdit
+from qtpy.QtWidgets import QWidget, QHBoxLayout,QVBoxLayout,QFormLayout,QPushButton,QCheckBox,QLabel,QMessageBox,QFileDialog,QDialog,QComboBox,QListWidget,QAbstractItemView,QLineEdit,QMenu,QRadioButton,QSlider,QFrame,QScrollArea,QButtonGroup,QTextEdit,QProgressBar,QSpinBox
+import pyqtgraph
 from magicgui import magic_factory
 
 import os
@@ -15,7 +16,7 @@ import skimage.io, skimage.util
 from roifile import ImagejRoi,ROI_TYPE,roiwrite,ROI_OPTIONS
 from napari.layers import Shapes, Image, Labels
 import numpy
-from qtpy.QtCore import Qt,QSize,QRect
+from qtpy.QtCore import Qt,QSize,QRect,Signal
 from qtpy.QtGui import QPixmap,QCursor
 #from napari.layers.Shapes import mode
 from napari.layers.shapes import _shapes_key_bindings as key_bindings
@@ -25,9 +26,15 @@ import warnings
 import cv2
 from copy import deepcopy,copy
 #from napari.qt import create_worker #thread_worker
-from napari.qt.threading import thread_worker #create_worker
+from napari.qt.threading import thread_worker,GeneratorWorker,GeneratorWorkerSignals,FunctionWorker #create_worker
 from napari._qt.qt_resources import get_stylesheet
+from napari.utils.notifications import show_info,show_warning,show_error
+from typing import Union,Optional,TypeVar,Callable,Generator
+from typing_extensions import ParamSpec
 from tqdm import tqdm
+from tensorflow.python.keras.callbacks import Callback
+import tensorflow.math
+from tensorflow import convert_to_tensor
 
 # suppress numpy's FutureWarning: numpy\core\numeric.py:2449: FutureWarning: elementwise comparison failed; returning scalar instead, but in the future will perform elementwise comparison!
 warnings.filterwarnings('ignore', category=FutureWarning)
@@ -920,7 +927,7 @@ class AnnotatorJ(QWidget):
                 # try to find an already opened image and use it
                 foundit=self.findOpenedImage()
                 if not foundit:
-                    warnings.warn('Open an image and annotate it first')
+                    show_warning('Open an image and annotate it first')
                     return
                 else:
                     # good to go
@@ -1642,10 +1649,10 @@ class AnnotatorJ(QWidget):
 
                 else:
                     # cannot find path and image name
-                    warnings.warn(f'Cannot initalize image layer')
+                    show_warning(f'Cannot initalize image layer')
             else:
                 # image layer has no data
-                warnings.warn(f'Image layer is empty')
+                show_warning(f'Image layer is empty')
 
             return False
 
@@ -2136,7 +2143,7 @@ class AnnotatorJ(QWidget):
             # try to find an already opened image and use it
             foundit=self.findOpenedImage()
             if not foundit:
-                warnings.warn('Open an image and annotate it first')
+                show_warning('Open an image and annotate it first')
                 return
             else:
                 # good to go
@@ -2408,7 +2415,7 @@ class AnnotatorJ(QWidget):
                     key_bindings.finish_drawing_shape(layer)
                 except Exception as e:
                     print(e)
-                    warnings.warn('Failed to create roi, please try again')
+                    show_warning('Failed to create roi, please try again')
                 # remove the duplicated shape
                 if not self.contAssist and not self.inAssisting:
                     try:
@@ -2416,7 +2423,7 @@ class AnnotatorJ(QWidget):
                         layer.add(data=newcoords,shape_type='polygon',edge_width=self.annotEdgeWidth,edge_color=self.defColour,face_color=[0,0,0,0])
                     except Exception as e:
                         print(e)
-                        warnings.warn('Failed to create roi, please try again')
+                        show_warning('Failed to create roi, please try again')
                 layer.refresh()
 
                 if self.contAssist and not self.inAssisting:
@@ -2439,15 +2446,15 @@ class AnnotatorJ(QWidget):
         if layer.mode=='add_polygon' and not self.startedEditing:
             msg='Cannot start editing when {} is selected. Please select {}'.format(
                 '\'Add polygons(P)\'','\'Select shapes(5)\'')
-            warnings.warn(msg)
+            show_warning(msg)
             return
         elif layer.mode!='select' and not self.startedEditing:
             msg='Cannot start editing. Please select {}'.format('\'Select shapes(5)\'')
-            warnings.warn(msg)
+            show_warning(msg)
             return
         elif self.startedEditing:
             msg='Already started editing a contour'
-            warnings.warn(msg)
+            show_warning(msg)
             return
 
         yield
@@ -2597,14 +2604,14 @@ class AnnotatorJ(QWidget):
                             contour=contour[lengths.index(max(lengths))]
                         except Exception as e:
                             print(e)
-                            warnings.warn(msg)
+                            show_warning(msg)
                             return None
                         msg=msg+' - selecting largest contour'
                         print(msg)
                         #return None
                 else:
                     msg='Cannot create roi from this label'
-                    warnings.warn(msg)
+                    show_warning(msg)
                     return None
 
             shape=numpy.array(numpy.fliplr(numpy.squeeze(contour)))
@@ -2698,7 +2705,7 @@ class AnnotatorJ(QWidget):
         if self.editMode and self.startedEditing:
             # ctrl+q already bound to exit
             msg='missing Ctrl --> cannot update current contour'
-            warnings.warn(msg)
+            show_warning(msg)
 
 
     def eraseBrush(self,layer,event):
@@ -2779,14 +2786,14 @@ class AnnotatorJ(QWidget):
                             contour=contour[lengths.index(max(lengths))]
                         except Exception as e:
                             print(e)
-                            warnings.warn(msg)
+                            show_warning(msg)
                             return None
                         msg=msg+' - selecting largest contour'
                         print(msg)
                         #return None
                 else:
                     msg='Cannot create roi from this label'
-                    warnings.warn(msg)
+                    show_warning(msg)
                     return None
 
             shape=numpy.array(numpy.fliplr(numpy.squeeze(contour)))
@@ -2885,7 +2892,7 @@ class AnnotatorJ(QWidget):
 
         if newROI is None:
             # failed, return
-            warnings.warn('Failed suggesting a better contour')
+            show_warning('Failed suggesting a better contour')
             self.invertedROI=None
 
             # clean up
@@ -2983,14 +2990,14 @@ class AnnotatorJ(QWidget):
         if roiLayer.mode=='select' and not self.inAssisting:
             msg='Cannot start contour assist when {} is selected. Please select {}'.format(
                 '\'Select shapes(5)\'','\'Add polygons(P)\'')
-            warnings.warn(msg)
+            show_warning(msg)
             return
         elif roiLayer.mode!='add_polygon' and not self.inAssisting:
             if roiLayer.mode=='add_rectangle' and not self.inAssisting and self.allowContAssistBbox:
                 print('Using bboxes in Contour assist mode')
             else:
                 msg='Cannot start contour assist. Please select {}'.format('\'Add polygons(P)\'')
-                warnings.warn(msg)
+                show_warning(msg)
                 return
         elif self.inAssisting:
             # do nothing on mouse release
@@ -3079,7 +3086,7 @@ class AnnotatorJ(QWidget):
             
             if newROI is None:
                 # failed, return
-                warnings.warn('Failed suggesting a better contour')
+                show_warning('Failed suggesting a better contour')
                 self.invertedROI=None
 
                 # clean up
@@ -3262,7 +3269,7 @@ class AnnotatorJ(QWidget):
                         layer.refresh()
                     except Exception as e:
                         print(e)
-                        warnings.warn('Failed to limit ROI to image size, please try again')
+                        show_warning('Failed to limit ROI to image size, please try again')
                 else:
                     return
         else:
@@ -3449,7 +3456,7 @@ class AnnotatorJ(QWidget):
             # try to find an already opened image and use it
             foundit=self.findOpenedImage()
             if not foundit:
-                warnings.warn('Use Open to select an image in a folder first')
+                show_warning('Use Open to select an image in a folder first')
                 return
             else:
                 # good to go
@@ -3493,7 +3500,7 @@ class AnnotatorJ(QWidget):
 
         # this should not happen due to button inactivation, but handle it anyway:
         # if we get here there is no previous image to open, show message
-        warnings.warn('There is no previous image in the current folder')
+        show_warning('There is no previous image in the current folder')
         return
 
 
@@ -3506,7 +3513,7 @@ class AnnotatorJ(QWidget):
             # try to find an already opened image and use it
             foundit=self.findOpenedImage()
             if not foundit:
-                warnings.warn('Use Open to select an image in a folder first')
+                show_warning('Use Open to select an image in a folder first')
                 return
             else:
                 # good to go
@@ -3550,7 +3557,7 @@ class AnnotatorJ(QWidget):
 
         # this should not happen due to button inactivation, but handle it anyway:
         # if we get here there is no previous image to open, show message
-        warnings.warn('There is no previous image in the current folder')
+        show_warning('There is no previous image in the current folder')
         return
 
 
@@ -3643,7 +3650,7 @@ class AnnotatorJ(QWidget):
             print('Image type: GRAY16')
         elif (origImageType==numpy.dtype('float32') or origImageType==numpy.dtype('float64')) and ch==0:
             maxOrigVal=int(1.0)
-            warnings.warn('Current image is of type float in range [0,1].\nType not supported in suggestion mode.')
+            show_warning('Current image is of type float in range [0,1].\nType not supported in suggestion mode.')
             print('Image type: GRAY32')
             return None
         elif (origImageType==numpy.dtype('uint8') or origImageType==numpy.dtype('int8')) and ch==3:
@@ -3785,7 +3792,7 @@ class AnnotatorJ(QWidget):
             else:
                 self.curOrigImage=None
             if self.curOrigImage is None:
-                warnings.warn('Cannot find image')
+                show_warning('Cannot find image')
                 return None
 
             print('  >> input image prepared...')
@@ -4188,6 +4195,7 @@ class AnnotatorJ(QWidget):
             drawBboxPopup=QDialog()
             drawBboxPopup.setModal(True)
             drawBboxPopup.setWindowTitle('Draw a bounding box')
+            drawBboxPopup.setStyleSheet(get_stylesheet('dark'))
             lblGuide=QLabel('Draw a bbox where you would like to<br>see a prediction with your new model<br>Press "Esc" to continue')
             layout=QVBoxLayout()
             layout.addWidget(lblGuide)
@@ -4246,11 +4254,11 @@ class AnnotatorJ(QWidget):
         if layer.mode=='add_polygon':
             msg='Cannot start classifying when {} is selected. Please select {}'.format(
                 '\'Add polygons(P)\'','\'Select shapes(5)\'')
-            warnings.warn(msg)
+            show_warning(msg)
             return
         elif layer.mode!='select':
             msg='Cannot start classifying. Please select {}'.format('\'Select shapes(5)\'')
-            warnings.warn(msg)
+            show_warning(msg)
             return
 
         yield
@@ -4259,7 +4267,7 @@ class AnnotatorJ(QWidget):
         if self.editMode or self.addAuto or self.inAssisting:
             # cannot classify in edit mode
             msg='Cannot classify objects if selected:\n edit mode\n contour assist\n add automatically'
-            warnings.warn(msg)
+            show_warning(msg)
             return
 
         # find current image
@@ -4370,7 +4378,7 @@ class AnnotatorJ(QWidget):
         # try to find an already opened image and use it
         foundit=self.findOpenedImage(initSrc=self.chkEdit)
         if not foundit:
-            warnings.warn('Use Open to select an image in a folder first')
+            show_warning('Use Open to select an image in a folder first')
             self.editMode=False
             return
         else:
@@ -4472,7 +4480,7 @@ class AnnotatorJ(QWidget):
             # try to find an already opened image and use it
             foundit=self.findOpenedImage(initSrc=self.chckbxContourAssist)
             if not foundit:
-                warnings.warn('Use Open to select an image in a folder first')
+                show_warning('Use Open to select an image in a folder first')
                 self.contAssist=False
                 return
             else:
@@ -4546,14 +4554,14 @@ class AnnotatorJ(QWidget):
 
     def setClassMode(self,state):
         if self.selectedAnnotationType=='semantic':
-            warnings.warn('Class mode is not supported in semantic annotation type')
+            show_warning('Class mode is not supported in semantic annotation type')
             return
         shapesLayer=self.findROIlayer()
 
         # try to find an already opened image and use it
         foundit=self.findOpenedImage(initSrc=self.chckbxClass)
         if not foundit:
-            warnings.warn('Use Open to select an image in a folder first')
+            show_warning('Use Open to select an image in a folder first')
             self.classMode=False
             return
         else:
@@ -4632,7 +4640,7 @@ class AnnotatorJ(QWidget):
         # try to find an already opened image and use it
         foundit=self.findOpenedImage(initSrc=self.chkShowOverlay)
         if not foundit:
-            warnings.warn('Use Open to select an image in a folder first')
+            show_warning('Use Open to select an image in a folder first')
             self.showOvl=False
             return
         else:
@@ -4671,7 +4679,7 @@ class AnnotatorJ(QWidget):
             # try to find an already opened image and use it
             foundit=self.findOpenedImage()
             if not foundit:
-                warnings.warn('Open an image and annotate it first')
+                show_warning('Open an image and annotate it first')
                 return
             else:
                 # good to go
@@ -4841,7 +4849,7 @@ class AnnotatorJ(QWidget):
             if textVal is None or textVal=='null' or len(textVal)==0:
                 # empty string, warn the user to type something
                 self.finishedSelection=False
-                warnings.warn('Please enter a new class name or select one from the list to continue.')
+                show_warning('Please enter a new class name or select one from the list to continue.')
             else:
                 self.selectedClass=textVal
                 self.finishedSelection=True
@@ -6241,7 +6249,7 @@ class ExportFrame(QWidget):
         # check if there are correct files in the selected folder
         if fileListCount<1:
             print('No original image files found in current folder')
-            warnings.warn('Could not find original image files in selected folder')
+            show_warning('Could not find original image files in selected folder')
             self.started=False
             return
 
@@ -6311,7 +6319,7 @@ class ExportFrame(QWidget):
         # check if there are correct files in the selected folder
         if ROIListCount<1:
             print('No annotation files found in current folder')
-            warnings.warn('Could not find annotation files in selected folder')
+            show_warning('Could not find annotation files in selected folder')
             self.started=False
             return
 
@@ -6430,7 +6438,7 @@ class ExportFrame(QWidget):
             if self.textFieldROI.text()!='':   
                 self.initializeROIFolderOpening(self.textFieldROI.text())
 
-            warnings.warn('Semantic annotation type selected.\nExported images (instance, stack) might\ncontain multiple touching objects as one!')
+            show_warning('Semantic annotation type selected.\nExported images (instance, stack) might\ncontain multiple touching objects as one!')
         else:
             # handle in next button's selected option
             pass
@@ -6468,7 +6476,7 @@ class ExportFrame(QWidget):
     def startExportProgress(self):
         if not self.started:
             print('Open an image and annotation folder first')
-            warnings.warn('Click Browse buttons to initialize folders')
+            show_warning('Click Browse buttons to initialize folders')
             return
 
 
@@ -6476,7 +6484,7 @@ class ExportFrame(QWidget):
         if not self.multiLabel and not self.multiLayer and not self.semantic and not self.coordinates and not self.overlay:
             print('Select export option')
             print('No export option is selected')
-            warnings.warn('Select at least one export option')
+            show_warning('Select at least one export option')
             return
 
         self.finished=False
@@ -6756,7 +6764,7 @@ class ExportFrame(QWidget):
             height=dimensions[1]
         else:
             print(f'Could not open original image: {curOrigFileName}')
-            warnings.warn('Could not open original image: {curOrigFileName}')
+            show_warning('Could not open original image: {curOrigFileName}')
             # allow to continue the processing?
             # if not, close progressbar too
 
@@ -6770,10 +6778,10 @@ class ExportFrame(QWidget):
                 #debug:
                 print(os.path.join(self.annotationFolder,curAnnotFileName))
                 rois=ImagejRoi.fromfile(os.path.join(self.annotationFolder,curAnnotFileName))
-                shapesLayer=self.extractROIdataSimple(rois)
+                shapesLayer=self.extractROIdataSimple(rois,self.annotEdgeWidth)
             except Exception as e:
                 print(f'Failed to open ROI: {curAnnotFileName}');
-                warnings.warn('Failed to open ROI .zip file')
+                show_warning('Failed to open ROI .zip file')
                 print(e)
                 return
             print(f'Opened ROI: {curAnnotFileName}')
@@ -6793,7 +6801,7 @@ class ExportFrame(QWidget):
                 semheight=semdimensions[1]
                 if semwidth!=width or semheight!=height:
                     print(f'Inconsistent size of semantic annotation image: {curAnnotFileName}, skipping it')
-                    warnings.warn(f'Could not verify annotation image: {curAnnotFileName}')
+                    show_warning(f'Could not verify annotation image: {curAnnotFileName}')
                     return
 
                 # create rois from it
@@ -6828,7 +6836,7 @@ class ExportFrame(QWidget):
 
             else:
                 print(f'Could not open original image: {curOrigFileName}')
-                warnings.warn(f'Could not open original image: {curOrigFileName}')
+                show_warning(f'Could not open original image: {curOrigFileName}')
                 # allow to continue the processing?
                 # if not, close progressbar too
 
@@ -7202,7 +7210,8 @@ class ExportFrame(QWidget):
         return stack
 
 
-    def saveExportedImage(self,img,path):
+    @staticmethod
+    def saveExportedImage(img,path):
         if len(img.shape)==2:
             if img.dtype!=bool:
                 skimage.io.imsave(path,img,check_contrast=False)
@@ -7416,7 +7425,8 @@ class ExportFrame(QWidget):
 
 
     # mock a similar function to AnnotatorJ class' extractROIdata fcn
-    def extractROIdataSimple(self,rois):
+    @staticmethod
+    def extractROIdataSimple(rois,annotEdgeWidth):
         # fetch the coordinates and other data from the ImageJ ROI.zip file already imported with the roifile package
         # Inputs:
         #   rois: list of ImageJ ROI objects
@@ -7475,7 +7485,8 @@ class ExportFrame(QWidget):
 
         # fill (face) colour of rois is transparent by default, only the contours are visible
         # edge_width=0.5 actually sets it to 1
-        shapesLayer = Shapes(data=roiList,shape_type=roiType,name='ROI',edge_width=self.annotEdgeWidth,edge_color=roiColours,face_color=[0,0,0,0],properties=roiProps,text=roiTextProps)
+        #shapesLayer = Shapes(data=roiList,shape_type=roiType,name='ROI',edge_width=self.annotEdgeWidth,edge_color=roiColours,face_color=[0,0,0,0],properties=roiProps,text=roiTextProps)
+        shapesLayer = Shapes(data=roiList,shape_type=roiType,name='ROI',edge_width=annotEdgeWidth,edge_color=roiColours,face_color=[0,0,0,0],properties=roiProps,text=roiTextProps)
 
         return shapesLayer
 
@@ -8048,7 +8059,7 @@ class OptionsFrame(QWidget):
                     else:
                         # maybe check type to avoid mismatched annot types in saved files
                         # TODO
-                        warnings.warn(f'Set {newAnnotType} but current is {self.annotatorjObj.selectedAnnotationType}')
+                        show_warning(f'Set {newAnnotType} but current is {self.annotatorjObj.selectedAnnotationType}')
                         pass
             elif self.annotatorjObj.selectedAnnotationType=='semantic':
                 # labels layer
@@ -8276,7 +8287,7 @@ class OptionsFrame(QWidget):
     def checkModelFullFile(self):
         newVal=self.modelFullEl.text()
         if not (newVal.endswith('.hdf5') or newVal.endswith('.h5')):
-            warnings.warn('Model full file name must have an extension like ".hdf5" or ".h5"')
+            show_warning('Model full file name must have an extension like ".hdf5" or ".h5"')
             self.modelFullEl.setText(self.annotatorjObj.modelFullFile)
         else:
             print(f'Model full file: {newVal}')
@@ -8289,12 +8300,12 @@ class OptionsFrame(QWidget):
     def checkModelJsonFile(self):
         newVal=self.modelJsonEl.text()
         if newVal.endswith('.json'):
-            warnings.warn('Model graph .json file name must not contain ".json"')
+            show_warning('Model graph .json file name must not contain ".json"')
             self.modelJsonEl.setText(self.annotatorjObj.modelJsonFile)
         else:
             weightsName=self.modelWeightsEl.text().replace('_weights.h5','').replace('_weights.hdf5','')
             if weightsName!=newVal:
-                warnings.warn('Model graph .json file must have the same name as the weights file without the "_weights.[h5,hdf5]" suffix')
+                show_warning('Model graph .json file must have the same name as the weights file without the "_weights.[h5,hdf5]" suffix')
             else:
                 print(f'Model .json file: {newVal}')
 
@@ -8306,14 +8317,14 @@ class OptionsFrame(QWidget):
     def checkModelFolder(self):
         newVal=self.modelFolderEl.text()
         if not os.path.isdir(newVal):
-            warnings.warn(f'Model folder {newVal} does not exist. Please select an existing model folder')
+            show_warning(f'Model folder {newVal} does not exist. Please select an existing model folder')
             self.modelFolderEl.setText(self.annotatorjObj.modelFolder)
         else:
             # find model files in folder
             modelFileNames=[self.modelJsonEl.text()+'.json',self.modelFullEl.text(),self.modelWeightsEl.text]
             files=[f for f in os.listdir(newVal) if os.path.isfile(os.path.join(newVal,f)) and (f in modelFileNames)]
             if len(files)==0:
-                warnings.warn(f'No model files found in folder {newVal}. Please select a model folder with valid model files')
+                show_warning(f'No model files found in folder {newVal}. Please select a model folder with valid model files')
                 self.modelFolderEl.setText(self.annotatorjObj.modelFolder)
             else:
                 # found model files
@@ -8340,12 +8351,12 @@ class OptionsFrame(QWidget):
     def checkModelWeightsFile(self):
         newVal=self.modelWeightsEl.text()
         if not (newVal.endswith('_weights.h5') or newVal.endswith('_weights.hdf5')):
-            warnings.warn('Model weights file name must end with "_weights.h5" or "_weights.hdf5"')
+            show_warning('Model weights file name must end with "_weights.h5" or "_weights.hdf5"')
             self.modelWeightsEl.setText(self.annotatorjObj.modelWeightsFile)
         else:
             jsonName=self.modelJsonEl.text()
             if jsonName!=newVal.replace('_weights.h5','').replace('_weights.hdf5',''):
-                warnings.warn('Model graph .json file must have the same name as the weights file without the "_weights.[h5,hdf5]" suffix')
+                show_warning('Model graph .json file must have the same name as the weights file without the "_weights.[h5,hdf5]" suffix')
             else:
                 print(f'Model weights file: {newVal}')
 
@@ -8641,6 +8652,12 @@ class TrainWidget(QWidget):
         self.browseFieldVBox=QVBoxLayout()
         self.browseBtnVBox=QVBoxLayout()
         self.trainBtnHBox=QHBoxLayout()
+        self.headerHBox=QHBoxLayout()
+        self.headerInnerHBox=QHBoxLayout()
+        self.settingsVBox=QFormLayout()
+        self.settingsArea=QFrame()
+        self.progressVBox=QVBoxLayout()
+        self.progressArea=QFrame()
 
         #self.lblWarn=QLabel('Make sure you annotated all<br>objects on the current image')
         self.chkbxUseCurrent=QCheckBox('Use current annot')
@@ -8682,15 +8699,81 @@ class TrainWidget(QWidget):
         
         self.btnStop=QPushButton('Stop')
         self.btnStop.setToolTip('Stop current training process')
-        self.btnStop.clicked.connect(self.stopTraining)
+        #self.btnStop.clicked.connect(self.stopTraining)
 
         self.btnPrep=QPushButton('Prep data')
         self.btnPrep.setToolTip('Prepare training data from original images and annotations')
         self.btnPrep.clicked.connect(self.prepTraining)
 
+        self.btnSettings=QPushButton('*')
+        self.btnSettings.setToolTip('Show and set training parameters')
+        self.btnSettings.clicked.connect(self.showSettings)
+
         self.btnTrain.setStyleSheet(f"min-width: {self.annotatorjObj.bsize2}px")
         self.btnStop.setStyleSheet(f"min-width: {self.annotatorjObj.bsize2}px")
         self.btnPrep.setStyleSheet(f"min-width: {self.annotatorjObj.bsize2}px")
+
+        self.trainLbl=QLabel('Progress')
+        #self.trainPlotWidget=QLabel('plot')
+        self.epochProgressBar=self.startEpochProgressBar()
+
+        # plot training loss
+        self.trainPlotWidget=pyqtgraph.GraphicsLayoutWidget()
+        self.trainPlotWidget.setBackground(None)
+        self.trainPlot=self.trainPlotWidget.addPlot()
+        self.trainPlot.setLabel("bottom","epoch")
+        self.trainPlot.setLabel("left","loss")
+        self.trainPlot.addLegend(offset=(175,-100))
+        self.trainPlot.clear()
+
+        # settings
+        self.spinEpochs=QSpinBox()
+        self.spinEpochs.setMinimum(1)
+        self.spinEpochs.setMaximum(1000)
+        self.spinEpochs.setSingleStep(1)
+        self.spinEpochs.setValue(5)
+        self.spinEpochs.valueChanged.connect(self.updateEpochs)
+
+        self.spinSteps=QSpinBox()
+        self.spinSteps.setMinimum(1)
+        self.spinSteps.setMaximum(1000)
+        self.spinSteps.setSingleStep(1)
+        self.spinSteps.setValue(1)
+        self.spinSteps.valueChanged.connect(self.updateSteps)
+
+        self.spinBatches=QSpinBox()
+        self.spinBatches.setMinimum(1)
+        self.spinBatches.setMaximum(1024)
+        self.spinBatches.setSingleStep(1)
+        self.spinBatches.setValue(1)
+        self.spinBatches.valueChanged.connect(self.updateBatches)
+
+        self.spinSize=QSpinBox()
+        self.spinSize.setMinimum(64)
+        self.spinSize.setMaximum(2048)
+        self.spinSize.setSingleStep(64)
+        self.spinSize.setValue(256)
+        self.spinSize.valueChanged.connect(self.updateSize)
+
+        self.chckbxScatch=QCheckBox()
+        self.chckbxScatch.setToolTip('Start training from scratch. The default model will be fine-tune when unchecked (default).')
+        self.chckbxScatch.setChecked(False)
+        self.chckbxScatch.stateChanged.connect(self.setScratch)
+
+        self.chckbxWrite=QCheckBox()
+        self.chckbxWrite.setToolTip('Write predicted image to file')
+        self.chckbxWrite.setChecked(False)
+        self.chckbxWrite.stateChanged.connect(self.setWrite)
+
+        self.lineTest=QLineEdit()
+        self.lineTest.setToolTip('Select image to test new model on')
+        self.lineTest.editingFinished.connect(self.setTest)
+
+        # layouts
+        self.headerHBox.addWidget(self.chkbxUseCurrent)
+        self.headerInnerHBox.addWidget(self.btnSettings)
+        self.headerInnerHBox.setAlignment(Qt.AlignRight)
+        self.headerHBox.addLayout(self.headerInnerHBox)
 
         self.browseFieldVBox.addWidget(self.imageDataLine)
         self.browseFieldVBox.addWidget(self.annotDataLine)
@@ -8701,16 +8784,36 @@ class TrainWidget(QWidget):
         self.browseHBox.addLayout(self.browseFieldVBox)
         self.browseHBox.addLayout(self.browseBtnVBox)
 
+        self.settingsVBox.addRow('Epochs',self.spinEpochs)
+        self.settingsVBox.addRow('Steps',self.spinSteps)
+        self.settingsVBox.addRow('Batch size',self.spinBatches)
+        self.settingsVBox.addRow('Image size',self.spinSize)
+        self.settingsVBox.addRow('Start from scratch',self.chckbxScatch)
+        self.settingsVBox.addRow('Write pred',self.chckbxWrite)
+        self.settingsVBox.addRow('Test image',self.lineTest)
+        self.settingsArea.setLayout(self.settingsVBox)
+        self.settingsArea.hide()
+
         self.trainBtnHBox.setAlignment(Qt.AlignRight)
         self.trainBtnHBox.addWidget(self.btnPrep)
         self.trainBtnHBox.addWidget(self.btnTrain)
         self.trainBtnHBox.addWidget(self.btnStop)
 
-        self.mainVbox.addWidget(self.chkbxUseCurrent)
+        self.progressVBox.addSpacing(int(self.annotatorjObj.bsize2/4))
+        self.progressVBox.addWidget(self.trainLbl)
+        self.progressVBox.addWidget(self.epochProgressBar)
+        self.progressVBox.addWidget(self.trainPlotWidget)
+        self.progressArea.setLayout(self.progressVBox)
+        self.progressArea.hide()
+        self.settingsShown=False
+
+        self.mainVbox.addLayout(self.headerHBox)
         #self.mainVbox.addWidget(self.lblWarn)
         self.mainVbox.addWidget(self.lblData)
         self.mainVbox.addLayout(self.browseHBox)
+        self.mainVbox.addWidget(self.settingsArea)
         self.mainVbox.addLayout(self.trainBtnHBox)
+        self.mainVbox.addWidget(self.progressArea)
 
 
         self.setLayout(self.mainVbox)
@@ -8729,6 +8832,10 @@ class TrainWidget(QWidget):
         self.startedPrep=False
         self.startedTrain=False
         self.started=False
+        self.args=None
+
+        self.trainingProgress={'epochs':[],'losses':[]}
+        self.trainingProgressStep={'steps':[],'losses':[]}
 
         if self.annotatorjObj is not None:
             dw=self.viewer.window.add_dock_widget(self,name='Train')
@@ -8764,21 +8871,21 @@ class TrainWidget(QWidget):
                     # image and roi layer exist, check if empty
                     # TODO
                     if roiLayer.data is not None and len(roiLayer.data)>0:
-                        warnings.warn('Make sure you annotated all objects on the current image')
+                        show_warning('Make sure you annotated all objects on the current image')
                         return True
                     else:
-                        warnings.warn('Current image has no annotations')
+                        show_warning('Current image has no annotations')
                         return False
                 else:
                     # no annotation layer, only image
-                    warnings.warn('Current image has no annotations')
+                    show_warning('Current image has no annotations')
                     return False
             else:
                 # no image layer opened
-                warnings.warn('No image opened')
+                show_warning('No image opened')
                 return False
         else:
-            warnings.warn('Cannot find image layer')
+            show_warning('Cannot find image layer')
             return False
 
 
@@ -8881,7 +8988,7 @@ class TrainWidget(QWidget):
         # check if there are correct files in the selected folder
         if fileListCount<1:
             print('No original image files found in current folder')
-            warnings.warn('Could not find original image files in selected folder')
+            show_warning('Could not find original image files in selected folder')
             self.started=False
             return
 
@@ -8889,7 +8996,7 @@ class TrainWidget(QWidget):
 
         self.startedOrig=True
         if self.startedROI:
-            self.started=True
+            self.started=self.popPrep()
 
         if self.startedOrig and self.startedROI:
             self.prepDataLine.setEnabled(False)
@@ -8932,7 +9039,7 @@ class TrainWidget(QWidget):
         if ROIListCount<1:
             if expListCount<1:
                 print('No annotation files found in current folder')
-                warnings.warn('Could not find annotation files in selected folder')
+                show_warning('Could not find annotation files in selected folder')
                 self.started=False
                 return
             else:
@@ -8943,7 +9050,7 @@ class TrainWidget(QWidget):
 
         self.startedROI=True
         if self.startedOrig:
-            self.started=True
+            self.started=self.popPrep()
 
         if self.startedOrig and self.startedROI:
             self.prepDataLine.setEnabled(False)
@@ -8963,7 +9070,7 @@ class TrainWidget(QWidget):
             # check if there are correct files in the selected folder
             if fileListCount<1:
                 print('No original image files found in current folder')
-                warnings.warn('Could not find original image files in selected folder')
+                show_warning('Could not find original image files in selected folder')
                 self.started=False
                 return
 
@@ -8986,7 +9093,7 @@ class TrainWidget(QWidget):
             # check if there are correct files in the selected folder
             if ROIListCount<1:
                 print('No annotation files found in current folder')
-                warnings.warn('Could not find annotation files in selected folder')
+                show_warning('Could not find annotation files in selected folder')
                 self.started=False
                 return
 
@@ -8999,13 +9106,211 @@ class TrainWidget(QWidget):
             return
 
 
+    def popPrep(self):
+        # disable training until prepped or train data browsed
+        self.btnTrain.setEnabled(False)
+        self.btnTrain.setStyleSheet(f"min-width: {self.annotatorjObj.bsize2}px; background-color: gray")
+        
+        response=QMessageBox.information(self, 'Information', 'Prepare trining data by pressing<br><b>Prep data</b><br>Press "Esc" to continue',QMessageBox.Ok, QMessageBox.Ok)
+        if response==QMessageBox.Ok:
+            # just quit
+            print('Ok button clicked')
+
+        elif response==QMessageBox.Close:
+            # do nothing
+            print("Closed close confirm")
+
+
     def prepTraining(self):
         self.prepDataLine.setEnabled(False)
         self.btnBrowsePrep.setEnabled(False)
-        self.btnBrowsePrep.setStyleSheet(f"background-color: gray")
+        self.btnBrowsePrep.setStyleSheet(f"min-width: {self.annotatorjObj.bsize2}px; background-color: gray")
         # how to reset after enabled:
         #self.btnBrowsePrep.setStyleSheet(get_stylesheet("dark"))
+
+        # prepare the training data
+        if self.annotationFolder is not None and self.annotationFolder!='' and self.originalFolder is not None and self.originalFolder!='':
+            # folders inited
+            # moved to its seperate fcn
+            width,height=self.prepOrigFolder(self.originalFolder)
+
+            ms=0
+            for mask in self.curExpList:
+                if os.path.isfile(os.path.join(self.annotationFolder,mask)):
+                    copyfile(os.path.join(self.annotationFolder,mask),os.path.join(maskDir,mask))
+                    ms+=1
+            if ms>0:
+                print(f'Copied {ms} exported annotation files for training')
+
+            ms=0
+            annotFileCount=len(self.curROIList)
+
+            self.viewer.window._status_bar._toggle_activity_dock(True)
+
+            # set progressbar length
+            from napari.utils import progress
+
+            # create static method
+            ExportFrame.extractROIdataSimple=staticmethod(ExportFrame.extractROIdataSimple)
+            ExportFrame.saveExportedImage=staticmethod(ExportFrame.saveExportedImage)
+
+            with progress(range(annotFileCount)) as progressBar:
+                for i in progressBar:
+                    mask=self.curROIList[i]
+                    progressText=f'({i+1}/{annotFileCount}): {mask}'
+                    print(progressText)
+                    progressBar.set_description(progressText)
+                    #debug:
+                    print(progressText)
+                    if os.path.isfile(os.path.join(self.annotationFolder,mask)):
+                        # import rois then write to binary mask image
+                        # TODO
+                        rois=ImagejRoi.fromfile(os.path.join(self.annotationFolder,mask))
+                        shapesLayer=ExportFrame.extractROIdataSimple(rois,1)
+
+                        # check if there are annotated objects in the file:
+                        roiCount=len(shapesLayer.data) if shapesLayer is not None else 0
+                        print(f'annotated objects: {roiCount}')
+                        if roiCount<1:
+                            return
+
+                        # create mask image
+                        maskBaseName=os.path.splitext(mask)[-2]
+                        thisIm=[f for f in os.listdir(os.path.join(self.trainDataFolder,'images')) if os.path.splitext(f)[-2] in maskBaseName]
+                        if thisIm is not None and os.path.isfile(os.path.join(self.trainDataFolder,'images',thisIm[0])):
+                            img=skimage.io.imread(os.path.join(self.trainDataFolder,'images',thisIm[0]))
+                            s=img.shape
+                            width=s[0]
+                            height=s[1]
+                        # export a mask image from the rois
+                        labels=shapesLayer.to_labels([width, height])
+                        maskImage=labels.astype(bool)
+                        outputFileName=os.path.join(self.trainDataFolder,'unet_masks',maskBaseName+'.tiff')
+                        ExportFrame.saveExportedImage(maskImage,outputFileName)
+
+                    progressBar.update(1)
+
+            # make the progress bar activity panel invisible again
+            self.viewer.window._status_bar._toggle_activity_dock(False)
+
+            self.prepFinished()
+
+        else:
+            # no folder initialized
+            # check if current annotation can be used for training
+            if self.chkbxUseCurrent.isChecked():
+                # copy this original image
+                self.createTrainFolders(self.annotatorjObj.defDir) if not os.path.isdir(os.path.join(self.annotatorjObj.defDir,'training')) else self.createTrainFolders(self.findNewTrainDir(self.annotatorjObj.defDir))
+                from shutil import copyfile
+                copyfile(os.path.join(self.annotatorjObj.defDir,self.annotatorjObj.defFile),os.path.join(os.path.join(self.trainDataFolder,'images'),self.annotatorjObj.defFile))
+
+                # export this annotation
+                ExportFrame.saveExportedImage=staticmethod(ExportFrame.saveExportedImage)
+                s=self.annotatorjObj.imgSize if self.annotatorjObj.imgSize is not None else self.annotatorjObj.findImageLayer().shape
+                width=s[0]
+                height=s[1]
+                shapesLayer=self.annotatorjObj.findROIlayer()
+                if shapesLayer is None or len(shapesLayer.data)<1:
+                    show_warning('No annotations found on current image')
+                    return
+                maskBaseName=os.path.splitext(self.annotatorjObj.defFile)[-2]
+                # export a mask image from the rois
+                labels=shapesLayer.to_labels([width, height])
+                maskImage=labels.astype(bool)
+                outputFileName=os.path.join(self.trainDataFolder,'unet_masks',maskBaseName+'.tiff')
+                ExportFrame.saveExportedImage(maskImage,outputFileName)
+
+                self.prepFinished()
+            else:
+                # ask for confirmation
+                response=QMessageBox.information(self, 'Pred data failed', 'Failed preparing training data',QMessageBox.Ok, QMessageBox.Ok)
+                if response==QMessageBox.Ok:
+                    # just quit
+                    print('Ok button clicked')
+
+                elif response==QMessageBox.Close:
+                    # do nothing
+                    print("Closed close confirm")
+
         return
+
+
+    def prepOrigFolder(self,origFolder):
+        # self.curFileList is the orig image list
+            # self.curROIList is the annotation file list
+            # self.curExpList is the exported annotation file list
+            self.createTrainFolders(origFolder)
+
+            # copy images and exported annotation
+            if len(self.curFileList)>0 and (len(self.curROIList)>0 or len(self.curExpList)>0):
+                # at least 1 annotation + image file listed, can continue
+                pass
+            else:
+                show_warning(f'No annotated images found')
+                return None,None
+
+            ims=0
+            img=None
+            for im in self.curFileList:
+                if os.path.isfile(os.path.join(origFolder,im)):
+                    from shutil import copyfile
+                    copyfile(os.path.join(origFolder,im),os.path.join(imDir,im))
+                    if ims==0:
+                        img=skimage.io.imread(os.path.join(origFolder,im))
+                    ims+=1
+            print(f'Copied {ims} image files for training')
+            if img is not None:
+                s=img.shape
+                width=s[0]
+                height=s[1]
+                return width,height
+            else:
+                show_warning(f'No image files could be found in folder {origFolder}')
+                return None,None
+
+
+    def createTrainFolders(self,origFolder):
+        self.trainDataFolder=os.path.join(origFolder,'training')
+        if not os.path.isdir(self.trainDataFolder):
+            os.makedirs(self.trainDataFolder,exist_ok=True)
+        else:
+            show_warning(f'Training data folder {self.trainDataFolder} already exists')
+        imDir=os.path.join(self.trainDataFolder,'images')
+        maskDir=os.path.join(self.trainDataFolder,'unet_masks')
+        if not os.path.isdir(imDir):
+            os.makedirs(imDir,exist_ok=True)
+        else:
+            show_warning(f'Images folder ("images") in training data folder {self.trainDataFolder} already exists')
+
+        if not os.path.isdir(maskDir):
+            os.makedirs(maskDir,exist_ok=True)
+        else:
+            show_warning(f'Mask folder ("unet_masks") in training data folder {self.trainDataFolder} already exists')
+
+
+    def findNewTrainDir(self,origFolder):
+        # origFolder/training already exists, try to set to a new one with _[num] suffix
+        suffix=1
+        while os.path.isdir(os.path.join(origFolder,'training_'+str(suffix))):
+            suffix+=1
+        return os.path.join(origFolder,'training_'+str(suffix))
+
+
+    def prepFinished(self):
+        # ask for confirmation
+        response=QMessageBox.information(self, 'Prep data finished', 'Finished preparing training data',QMessageBox.Ok, QMessageBox.Ok)
+        if response==QMessageBox.Ok:
+            # just quit
+            print('Ok button clicked')
+
+        elif response==QMessageBox.Close:
+            # do nothing
+            print("Closed close confirm")
+
+        self.startedPrep=True
+        self.btnTrain.setEnabled(True)
+        self.btnTrain.setStyleSheet(get_stylesheet('dark'))
+        self.btnTrain.setStyleSheet(f"min-width: {self.annotatorjObj.bsize2}px;")
 
 
     def startTraining(self):
@@ -9014,7 +9319,7 @@ class TrainWidget(QWidget):
             self.startUnetTrain()
 
         else:
-            print('Training data not prepared yet')
+            show_warning('Training data not prepared yet')
             return
         return
 
@@ -9022,32 +9327,94 @@ class TrainWidget(QWidget):
     @thread_worker(start_thread=False)
     def startUnetTraining(self):
         try:
-            from .predict_unet import trainIfNoModel,callPredictUnetLoadedNosetCustomSize,setGpu
+            from .predict_unet import trainIfNoModel,callPredictUnetLoadedNosetCustomSize,setGpu,loadUnetModel
         except ImportError as e:
             try:
-                from predict_unet import trainIfNoModel,callPredictUnetLoadedNosetCustomSize,setGpu
+                from predict_unet import trainIfNoModel,callPredictUnetLoadedNosetCustomSize,setGpu,loadUnetModel
             except Exception as e:
                 print(e)
                 return
 
         # prep training args
-        from argparse import Namespace
-        args=Namespace()
-        args.model=os.path.join(self.trainDataFolder,'model','model_real')
-        args.train=self.trainDataFolder
-        args.batch=1
-        args.epochs=1
-        args.steps=10
-        args.gpu=self.annotatorjObj.gpuSetting
-        args.write=False
-        args.size=256
-        args.test=None
-        args.results=None
-        self.args=args
+        if self.args is None:
+            self.initArgs()
+        self.args.model=os.path.join(self.trainDataFolder,'model','model_real')
+        self.args.train=self.trainDataFolder
+        args=self.args
 
         # train
         setGpu(gpuSetting=str(args.gpu))
-        model=trainIfNoModel(args)
+        #model=trainIfNoModel(args)
+
+        # train model here
+        # if model exists skip training and only predict test images
+        if os.path.isfile(args.model+'.json') and os.path.isfile(args.model+'_weights.h5'):
+            # load json and create model
+            model=loadUnetModel(args.model)
+            yield model
+
+        else:
+            # do training first
+            # help the manual startup script import:
+            try:
+                from .unet.data import trainGenerator
+                from .unet.model import unet
+            except ImportError as e:
+                try:
+                    from unet.data import trainGenerator
+                    from unet.model import unet
+                except Exception as e:
+                    print(e)
+                    exit()
+            from keras.callbacks import ModelCheckpoint,LearningRateScheduler
+            from tensorflow.keras.optimizers import Adam
+            
+            data_gen_args = dict(rotation_range=0.2,
+                                width_shift_range=0.05,
+                                height_shift_range=0.05,
+                                shear_range=0.05,
+                                zoom_range=0.05,
+                                horizontal_flip=True,
+                                fill_mode='nearest')
+            myGene = trainGenerator(args.batch,args.train,'images','unet_masks',data_gen_args,save_to_dir = None,target_size = (256,256),image_color_mode = "rgb")
+
+            if args.fromScratch:
+                model = unet(input_size = (256,256,3))
+            else:
+                try:
+                    model=loadUnetModel(os.path.join(self.annotatorjObj.modelFolder,self.annotatorjObj.modelJsonFile))
+                    model.compile(optimizer=Adam(learning_rate=1e-4),loss='binary_crossentropy',metrics=['accuracy'])
+                    #opt=Adam(learning_rate = 1e-4)
+                    #model.optimizer=opt
+                    print(f'loaded pre-trained unet model with lr={model.optimizer.lr.numpy()}')
+                except Exception as e:
+                    print(e)
+                    print(f'Could not load default model {os.path.join(self.annotatorjObj.modelFolder,self.annotatorjObj.modelJsonFile)}, starting training from scratch...')
+                    model = unet(input_size = (256,256,3))
+
+            model_checkpoint = ModelCheckpoint(args.model+'.hdf5', monitor='loss',verbose=1, save_best_only=True)
+
+            updateLR=LearningRateScheduler(self.setLR)
+
+            self.setEpochProgressBar(args.epochs,0)
+            for e in range(args.epochs):
+                print(f'Epoch {e+1}/{args.epochs}')
+                h=model.fit_generator(myGene,steps_per_epoch=args.steps,epochs=1,callbacks=[model_checkpoint] if args.fromScratch else [model_checkpoint,updateLR,CustomCallback(trainObj=self)])
+                cur={'history':h,'model':model,'epoch':e}
+                yield cur #model
+
+            # save model as json
+            model_json = model.to_json()
+            with open(args.model+'.json', 'w') as f:
+                f.write(model_json)
+
+            # save weights too
+            model.save_weights(args.model+'_weights.h5')
+
+        cur={'history':h,'model':model,'epoch':e}
+        #yield cur #model
+
+
         print(f'Finished training new model {args.model}')
         return model
 
@@ -9064,10 +9431,17 @@ class TrainWidget(QWidget):
     def startUnetTrain(self):
         #from .predict_unet import callPredictUnet,callPredictUnetLoaded#,loadUnetModel
         try:
-            threadWorker=self.startUnetTraining()
-            threadWorker.started.connect(lambda: print('>>>> Started training U-Net model...'))
-            threadWorker.returned.connect(lambda x: self.setUnetModelTrain(x))
-            threadWorker.start()
+            self.threadWorker=self.startUnetTraining()
+            #self.threadWorker=CustomThreadWorker(self.startUnetTraining)
+            #self.threadWorker.updated.connect(self.updatePlot)
+            self.threadWorker.started.connect(lambda: print('>>>> Started training U-Net model...'))
+            self.threadWorker.returned.connect(lambda x: self.setUnetModelTrain(x))
+            self.threadWorker.yielded.connect(lambda x: self.updateTrainProgressCallbacks(x)) #self.updateTrainProgress(x))
+            self.threadWorker.finished.connect(self.btnStop.clicked.disconnect)
+            self.threadWorker.aborted.connect(lambda: self.stopTrainingMsg())
+            self.btnStop.clicked.connect(self.stopTraining)
+            self.progressArea.show()
+            self.threadWorker.start()
         except Exception as e:
             print(f'Could not train model')
             print(e)
@@ -9108,6 +9482,15 @@ class TrainWidget(QWidget):
             pred=preds[0]
         elif isinstance(preds,numpy.ndarray):
             pred=preds
+        if args.write:
+            # write pred image
+            if self.trainDataFolder is not None:
+                outFolder=os.path.join(self.trainDataFolder,'preds')
+                os.makedirs(outFolder,exist_ok=True)
+                ExportFrame.saveExportedImage(pred,os.path.join(outFolder,'pred.png'))
+            else:
+                print(f'Cannot find train folder to write output to')
+        # comment these out, only for testing:
         title=self.viewer.add_image(pred,name='checking_title')
         titleIdx=self.viewer.layers.index(title)
         self.viewer.layers.selection.clear()
@@ -9127,7 +9510,202 @@ class TrainWidget(QWidget):
 
 
     def stopTraining(self):
+        if self.threadWorker is not None:
+            self.threadWorker.quit()
+            show_info('Stopping training...')
         return
+
+
+    def stopTrainingMsg(self):
+        # ask for confirmation
+        show_info('Stopped training')
+        response=QMessageBox.information(self, 'Info', 'Stopped training',QMessageBox.Ok, QMessageBox.Ok)
+        if response==QMessageBox.Ok:
+            # just quit
+            print('Ok button clicked')
+
+        elif response==QMessageBox.Close:
+            # do nothing
+            print("Closed close confirm")
+
+
+    def startEpochProgressBar(self):
+        self.epochProgressBar=QProgressBar()
+        self.epochProgressBar.setMinimum(0)
+        self.epochProgressBar.setMaximum(1) # self.args.epochs
+        self.epochProgressBar.setValue(0)
+        self.epochProgressBar.setFormat(f'Epoch {0}/{1}') # /{self.args.epochs}
+        self.epochProgressBar.setToolTip('Number of epochs passed')
+        self.epochProgressBar.setVisible(True)
+        #self.mainVbox.addWidget(self.epochProgressBar)
+        return self.epochProgressBar
+
+
+    def updateTrainProgress(self,curData):
+        self.epochProgressBar.setValue(curData['epoch']+1)
+        self.epochProgressBar.setFormat(f'Epoch {curData["epoch"]+1}/{self.args.epochs}')
+
+        lr=curData['model'].optimizer.lr.numpy()
+        print(f'Epoch: {curData["epoch"]+1}, lr: {lr}')
+
+        self.trainingProgress['epochs'].append(len(self.trainingProgress['epochs'])+1)
+        self.trainingProgress['losses'].append(curData['history'].history['loss'][0])
+
+        # update plot
+        self.trainPlot.clear()
+        self.trainPlot.plot(self.trainingProgress['epochs'],self.trainingProgress['losses'],pen=pyqtgraph.mkPen(color=(244,152,39),width=1),symbol='o',symbolSize=4,symbolPen=pyqtgraph.mkPen(color=(244,152,39)),symbolBrush=pyqtgraph.mkBrush(color=(244,152,39)),name='train')
+        if len(self.trainingProgressStep['losses'])>0:
+            self.trainPlot.plot(self.trainingProgressStep['steps'],self.trainingProgressStep['losses'],pen=pyqtgraph.mkPen(color=(52,148,186),width=1),symbolSize=2,symbolPen=pyqtgraph.mkPen(color=(52,148,186)),symbolBrush=pyqtgraph.mkBrush(color=(52,148,186,39)),name='step')
+
+
+    def updateTrainProgressCallbacks(self,curData):
+        self.epochProgressBar.setValue(curData['epoch']+1)
+        self.epochProgressBar.setFormat(f'Epoch {curData["epoch"]+1}/{self.args.epochs}')
+
+        #debug:
+        #lr=curData['model'].optimizer.lr.numpy()
+        #print(f'Epoch: {curData["epoch"]+1}, lr: {lr}')
+
+        primaryColour=(244,152,39)
+        secondaryColour=(128,193,219)
+        #secondaryColour=(52,148,186)
+
+        # update plot
+        self.updatePlot(primaryColour=primaryColour,secondaryColour=secondaryColour)
+
+
+    def updateTrainProgressStep(self,curData):
+        # step progress
+        self.trainingProgressStep['steps'].append(len(self.trainingProgressStep['steps'])+1)
+        self.trainingProgressStep['losses'].append(curData) #curData['history'])
+
+        #self.updatePlot()
+
+
+    def updateTrainProgressEpoch(self,curData):
+        # epoch progress
+        self.trainingProgress['epochs'].append(len(self.trainingProgress['epochs'])+1)
+        self.trainingProgress['losses'].append(curData) #curData['history'])
+
+        #self.updatePlot()
+
+
+    def updatePlot(self,primaryColour=(244,152,39),secondaryColour=(128,193,219)):
+        # draw plots with new data
+        self.trainPlot.clear()
+        if len(self.trainingProgressStep['losses'])>0:
+            self.trainPlot.plot(self.trainingProgressStep['steps'],self.trainingProgressStep['losses'],pen=pyqtgraph.mkPen(color=secondaryColour,width=1),symbolSize=2,symbolPen=pyqtgraph.mkPen(color=secondaryColour),symbolBrush=pyqtgraph.mkBrush(color=secondaryColour),name='step')
+        labels=[(e*self.args.steps,str(e)) for e in self.trainingProgress['epochs']]
+        self.trainPlot.plot([e*self.args.steps for e in self.trainingProgress['epochs']],self.trainingProgress['losses'],pen=pyqtgraph.mkPen(color=primaryColour,width=1),symbol='o',symbolSize=4,symbolPen=pyqtgraph.mkPen(color=primaryColour),symbolBrush=pyqtgraph.mkBrush(color=primaryColour),name='epoch',labels=labels)
+        ax=self.trainPlot.getAxis('bottom')
+        ax.setTicks([labels])
+
+
+    def setEpochProgressBar(self,maxi,val):
+        if self.args is not None:
+            maxi=self.args.epochs
+        self.epochProgressBar.setMaximum(maxi)
+        self.epochProgressBar.setValue(val)
+        self.epochProgressBar.setFormat(f'Epoch {val}/{maxi}')
+
+
+    def showSettings(self):
+        if not self.settingsShown:
+            self.settingsArea.show()
+            self.settingsShown=True
+        else:
+            self.settingsArea.hide()
+            self.settingsShown=False
+
+
+    def updateEpochs(self,value):
+        if self.args is not None:
+            self.args.epochs=value
+        else:
+            self.initArgs()
+            self.args.epochs=value
+
+
+    def updateSteps(self,value):
+        if self.args is not None:
+            self.args.steps=value
+        else:
+            self.initArgs()
+            self.args.steps=value
+
+
+    def updateBatches(self,value):
+        if self.args is not None:
+            self.args.batch=value
+        else:
+            self.initArgs()
+            self.args.batch=value
+
+
+    def updateSize(self,value):
+        if self.args is not None:
+            self.args.size=value
+        else:
+            self.initArgs()
+            self.args.size=value
+
+
+    def setScratch(self,state):
+        if self.args is None:
+            self.initArgs()
+        if state==Qt.Checked:
+            self.args.fromScratch=True
+        else:
+            self.args.fromScratch=False
+
+
+    def setWrite(self,state):
+        if self.args is None:
+            self.initArgs()
+        if state==Qt.Checked:
+            self.args.write=True
+        else:
+            self.args.write=False
+
+
+    def setTest(self):
+        # TODO
+        value=self.lineTest.text()
+        if self.args is None:
+            self.initArgs()
+        if os.path.isfile(str(value)):
+            self.args.test=str(value)
+            print(f'Set test to: {str(value)}')
+        else:
+            show_warning(f'Cannot set test to {str(value)}, file does not exist')
+            self.lineTest.setText('')
+        pass
+
+
+    def initArgs(self):
+        from argparse import Namespace
+        args=Namespace()
+        if self.trainDataFolder is not None:
+            args.model=os.path.join(self.trainDataFolder,'model','model_real')
+        else:
+            args.model=os.path.join('model','model_real') # dummy
+        args.train=self.trainDataFolder
+        args.batch=1
+        args.epochs=6
+        args.steps=1#10
+        args.gpu=self.annotatorjObj.gpuSetting
+        args.write=False
+        args.size=256
+        args.test=None
+        args.results=None
+        args.fromScratch=False
+        self.args=args
+
+
+    def setLR(self,epoch,lr):
+        # decrease learning rate by epochs
+        newLR=tensorflow.math.multiply(lr,tensorflow.convert_to_tensor(0.95)) #=0.0001
+        return newLR
 
 
     def closeWidget(self):
@@ -9249,6 +9827,107 @@ class Q3DWidget(QWidget):
 
 # -------------------------------------
 # end of class Q3DWidget
+# -------------------------------------
+
+
+class CustomCallback(Callback):
+    def __init__(self,trainObj=None):
+        self.trainObj=trainObj
+
+    def on_train_batch_end(self,batch,logs=None):
+        #print(f'\nbatch {batch} | loss: {logs["loss"]}, accuracy: {logs["accuracy"]}')
+        #cur={'history':logs['loss'],'model':self.model,'epoch':self.params['epochs']}
+        #self.trainObj.updateTrainProgressStep(cur)
+        self.trainObj.updateTrainProgressStep(logs['loss'])
+
+    def on_epoch_end(self,epochs,logs=None):
+        #print(f'epoch finished | loss: {logs["loss"]}, accuracy: {logs["accuracy"]}')
+        #cur={'history':logs['loss'],'model':self.model,'epoch':self.params['epochs']}
+        #self.trainObj.updateTrainProgressEpoch(cur)
+        self.trainObj.updateTrainProgressEpoch(logs['loss'])
+
+
+# -------------------------------------
+# end of class CustomCallback
+# -------------------------------------
+
+
+class CustomWorkerSignals(GeneratorWorkerSignals):
+    updated=Signal()
+
+
+_R = TypeVar("_R")
+_Y = TypeVar("_Y")
+_S = TypeVar("_S")
+_P = ParamSpec("_P")
+class CustomThreadWorker(FunctionWorker):
+    def __init__(
+        self,
+        func: Callable[_P, _R], #Generator[_Y, Optional[_S], _R]],
+        *args,
+        **kwargs,
+    ):
+        super().__init__(func=func)
+        self._signals=CustomWorkerSignals()
+        self._update_requested=False
+    '''
+    def __init__(self):
+        super().__init__()
+        self._signals=CustomWorkerSignals()
+        self._update_requested=False
+    '''
+
+
+    @property
+    def update_requested(self) -> bool:
+        """Whether the worker has been requested to update."""
+        return self._update_requested
+
+
+    # from https://napari.org/stable/_modules/superqt/utils/_qthreading.html#GeneratorWorkerSignals
+    def work(self) -> Union[Optional[_R], Exception]:
+        """Core event loop that calls the original function.
+
+        Enters a continual loop, yielding and returning from the original
+        function.  Checks for various events (quit, pause, resume, etc...).
+        (To clarify: we are creating a rudimentary event loop here because
+        there IS NO Qt event loop running in the other thread to hook into)
+        """
+        while True:
+            if self.abort_requested:
+                self.aborted.emit()
+                break
+            if self._paused:
+                if self._resume_requested:
+                    self._paused = False
+                    self._resume_requested = False
+                    self.resumed.emit()
+                else:
+                    time.sleep(self._pause_interval)
+                    continue
+            elif self._pause_requested:
+                self._paused = True
+                self._pause_requested = False
+                self.paused.emit()
+                continue
+            if self.update_requested:
+                self._update_requested=False
+                self.updated.emit()
+            try:
+                input = self._next_value()
+                output = self._gen.send(input)
+                self.yielded.emit(output)
+            except StopIteration as exc:
+                return exc.value
+            except RuntimeError as exc:
+                # The worker has probably been deleted.  warning will be
+                # emitted in `WorkerBase.run`
+                return exc
+        return None
+
+
+# -------------------------------------
+# end of class CustomThreadWorker
 # -------------------------------------
 
 
