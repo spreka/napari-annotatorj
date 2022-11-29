@@ -17,7 +17,7 @@ from roifile import ImagejRoi,ROI_TYPE,roiwrite,ROI_OPTIONS
 from napari.layers import Shapes, Image, Labels
 import numpy
 from qtpy.QtCore import Qt,QSize,QRect,Signal
-from qtpy.QtGui import QPixmap,QCursor
+from qtpy.QtGui import QPixmap,QCursor,QIcon
 #from napari.layers.Shapes import mode
 from napari.layers.shapes import _shapes_key_bindings as key_bindings
 from napari.layers.shapes import _shapes_mouse_bindings as mouse_bindings
@@ -83,6 +83,7 @@ class AnnotatorJ(QWidget):
 
         # logo files: annotatorj_logo_dark, annotatorj_logo_light, annotatorj_logo_red
         self.logoFile='annotatorj_logo_dark'
+        self.gearFile='gear_icon_white'
 
         self.closeingOnPurpuse=False
         self.started=False
@@ -8705,7 +8706,8 @@ class TrainWidget(QWidget):
         self.btnPrep.setToolTip('Prepare training data from original images and annotations')
         self.btnPrep.clicked.connect(self.prepTraining)
 
-        self.btnSettings=QPushButton('*')
+        self.btnSettings=QPushButton()
+        self.btnSettings.setIcon(QIcon(QPixmap(os.path.join(os.path.dirname(__file__),'icon',self.annotatorjObj.gearFile+'.svg'))))
         self.btnSettings.setToolTip('Show and set training parameters')
         self.btnSettings.clicked.connect(self.showSettings)
 
@@ -8755,10 +8757,16 @@ class TrainWidget(QWidget):
         self.spinSize.setValue(256)
         self.spinSize.valueChanged.connect(self.updateSize)
 
-        self.chckbxScatch=QCheckBox()
-        self.chckbxScatch.setToolTip('Start training from scratch. The default model will be fine-tune when unchecked (default).')
-        self.chckbxScatch.setChecked(False)
-        self.chckbxScatch.stateChanged.connect(self.setScratch)
+        self.chckbxScratch=QCheckBox()
+        self.chckbxScratch.setToolTip('Start training from scratch. The default model will be fine-tune when unchecked (default).')
+        self.chckbxScratch.setChecked(False)
+        self.chckbxScratch.stateChanged.connect(self.setScratch)
+
+        self.chckbxRetrain=QCheckBox()
+        self.chckbxRetrain.setToolTip('Refine latest model (only active after training)')
+        self.chckbxRetrain.setChecked(False)
+        self.chckbxRetrain.setEnabled(False)
+        self.chckbxRetrain.stateChanged.connect(self.setRetrain)
 
         self.chckbxWrite=QCheckBox()
         self.chckbxWrite.setToolTip('Write predicted image to file')
@@ -8788,9 +8796,11 @@ class TrainWidget(QWidget):
         self.settingsVBox.addRow('Steps',self.spinSteps)
         self.settingsVBox.addRow('Batch size',self.spinBatches)
         self.settingsVBox.addRow('Image size',self.spinSize)
-        self.settingsVBox.addRow('Start from scratch',self.chckbxScatch)
+        self.settingsVBox.addRow('Start from scratch',self.chckbxScratch)
+        self.settingsVBox.addRow('Retrain latest',self.chckbxRetrain)
         self.settingsVBox.addRow('Write pred',self.chckbxWrite)
         self.settingsVBox.addRow('Test image',self.lineTest)
+        self.settingsVBox.labelForField(self.chckbxRetrain).setStyleSheet("color: gray") # retrain checkbox
         self.settingsArea.setLayout(self.settingsVBox)
         self.settingsArea.hide()
 
@@ -8836,6 +8846,7 @@ class TrainWidget(QWidget):
 
         self.trainingProgress={'epochs':[],'losses':[]}
         self.trainingProgressStep={'steps':[],'losses':[]}
+        self.prevEpochs=[]
 
         if self.annotatorjObj is not None:
             dw=self.viewer.window.add_dock_widget(self,name='Train')
@@ -9326,6 +9337,7 @@ class TrainWidget(QWidget):
 
     @thread_worker(start_thread=False)
     def startUnetTraining(self):
+        show_info('Starting training...')
         try:
             from .predict_unet import trainIfNoModel,callPredictUnetLoadedNosetCustomSize,setGpu,loadUnetModel
         except ImportError as e:
@@ -9334,6 +9346,7 @@ class TrainWidget(QWidget):
             except Exception as e:
                 print(e)
                 return
+        from tensorflow.keras.optimizers import Adam
 
         # prep training args
         if self.args is None:
@@ -9348,10 +9361,24 @@ class TrainWidget(QWidget):
 
         # train model here
         # if model exists skip training and only predict test images
-        if os.path.isfile(args.model+'.json') and os.path.isfile(args.model+'_weights.h5'):
+        if os.path.isfile(args.model+'.json') and os.path.isfile(args.model+'_weights.h5') and not args.retrain:
             # load json and create model
             model=loadUnetModel(args.model)
-            yield model
+            h=None
+            e=-1
+            cur={'history':h,'model':model,'epoch':e}
+            print(f'Loaded existing trianed model {args.model}')
+            show_info('Trained model exists, loaded it. Check "Retrain latest" to retrain it.')
+
+            # reset progress
+            self.setEpochProgressBar(0,0)
+
+            # allow retrain now
+            model.compile(optimizer=Adam(learning_rate=1e-4),loss='binary_crossentropy',metrics=['accuracy'])
+            self.chckbxRetrain.setEnabled(True)
+            self.settingsVBox.labelForField(self.chckbxRetrain).setStyleSheet("color: white") # retrain checkbox
+
+            yield cur #model
 
         else:
             # do training first
@@ -9367,7 +9394,6 @@ class TrainWidget(QWidget):
                     print(e)
                     exit()
             from keras.callbacks import ModelCheckpoint,LearningRateScheduler
-            from tensorflow.keras.optimizers import Adam
             
             data_gen_args = dict(rotation_range=0.2,
                                 width_shift_range=0.05,
@@ -9380,13 +9406,13 @@ class TrainWidget(QWidget):
 
             if args.fromScratch:
                 model = unet(input_size = (256,256,3))
+            elif args.retrain:
+                model=self.trainedUNetModelNew
             else:
                 try:
                     model=loadUnetModel(os.path.join(self.annotatorjObj.modelFolder,self.annotatorjObj.modelJsonFile))
                     model.compile(optimizer=Adam(learning_rate=1e-4),loss='binary_crossentropy',metrics=['accuracy'])
-                    #opt=Adam(learning_rate = 1e-4)
-                    #model.optimizer=opt
-                    print(f'loaded pre-trained unet model with lr={model.optimizer.lr.numpy()}')
+                    #print(f'loaded pre-trained unet model with lr={model.optimizer.lr.numpy()}')
                 except Exception as e:
                     print(e)
                     print(f'Could not load default model {os.path.join(self.annotatorjObj.modelFolder,self.annotatorjObj.modelJsonFile)}, starting training from scratch...')
@@ -9411,11 +9437,12 @@ class TrainWidget(QWidget):
             # save weights too
             model.save_weights(args.model+'_weights.h5')
 
-        cur={'history':h,'model':model,'epoch':e}
-        #yield cur #model
+            # enable retrain now
+            self.chckbxRetrain.setEnabled(True)
+            self.settingsVBox.labelForField(self.chckbxRetrain).setStyleSheet("color: white") # retrain checkbox
 
+            print(f'Finished training new model {args.model}')
 
-        print(f'Finished training new model {args.model}')
         return model
 
 
@@ -9492,10 +9519,10 @@ class TrainWidget(QWidget):
                 print(f'Cannot find train folder to write output to')
         # comment these out, only for testing:
         title=self.viewer.add_image(pred,name='checking_title')
-        titleIdx=self.viewer.layers.index(title)
-        self.viewer.layers.selection.clear()
-        self.viewer.layers.move_selected(titleIdx,0)
-        self.viewer.reset_view()
+        #titleIdx=self.viewer.layers.index(title)
+        #self.viewer.layers.selection.clear()
+        #self.viewer.layers.move_selected(titleIdx,0)
+        #self.viewer.reset_view()
 
         # from AnnotatorJ.contourAssistUNet fcn to finish prediction and turn it into a shape
         print('  >> predicted image processed...')
@@ -9503,7 +9530,8 @@ class TrainWidget(QWidget):
         if tmpLayer is not None:
             tmpLayer.visible=True
 
-        self.annotatorjObj.curPredictionImage=tmpLayer.data
+        self.annotatorjObj.curPredictionImage=deepcopy(tmpLayer.data)
+        self.viewer.layers.remove(tmpLayer)
 
         # crop around bbox and contour creation moved to a separate fcn
         self.annotatorjObj.drawBboxPop()
@@ -9595,10 +9623,24 @@ class TrainWidget(QWidget):
         self.trainPlot.clear()
         if len(self.trainingProgressStep['losses'])>0:
             self.trainPlot.plot(self.trainingProgressStep['steps'],self.trainingProgressStep['losses'],pen=pyqtgraph.mkPen(color=secondaryColour,width=1),symbolSize=2,symbolPen=pyqtgraph.mkPen(color=secondaryColour),symbolBrush=pyqtgraph.mkBrush(color=secondaryColour),name='step')
-        labels=[(e*self.args.steps,str(e)) for e in self.trainingProgress['epochs']]
-        self.trainPlot.plot([e*self.args.steps for e in self.trainingProgress['epochs']],self.trainingProgress['losses'],pen=pyqtgraph.mkPen(color=primaryColour,width=1),symbol='o',symbolSize=4,symbolPen=pyqtgraph.mkPen(color=primaryColour),symbolBrush=pyqtgraph.mkBrush(color=primaryColour),name='epoch',labels=labels)
+        #labels=[(e*self.args.steps,str(e)) for e in self.trainingProgress['epochs']]
+        epochs2plot=self.prevEpochs
+        l=len(self.prevEpochs)
+        k=deepcopy(self.prevEpochs)
+        k.insert(0,0)
+        difis=[k[i]-k[i-1] for i,x in enumerate(k)]
+        difis.pop(0)
+        c=self.trainingProgress['epochs'][l:]
+        print(f'prevEpochs: {self.prevEpochs}')
+        epochs2plot+=[sum(difis)+(i+1)*self.args.steps for i,e in enumerate(c)]
+        labels=[(e,str(i+1)) for i,e in enumerate(epochs2plot)]
+        print(f'labels: {labels}')
+        print(f'epochs2plot: {epochs2plot}')
+        print(f'losses: {self.trainingProgress["losses"]}')
+        self.trainPlot.plot(epochs2plot,self.trainingProgress['losses'],pen=pyqtgraph.mkPen(color=primaryColour,width=1),symbol='o',symbolSize=4,symbolPen=pyqtgraph.mkPen(color=primaryColour),symbolBrush=pyqtgraph.mkBrush(color=primaryColour),name='epoch',labels=labels)
         ax=self.trainPlot.getAxis('bottom')
         ax.setTicks([labels])
+        self.prevEpochs=epochs2plot
 
 
     def setEpochProgressBar(self,maxi,val):
@@ -9655,8 +9697,23 @@ class TrainWidget(QWidget):
             self.initArgs()
         if state==Qt.Checked:
             self.args.fromScratch=True
+            if self.chckbxRetrain.isChecked():
+                self.chckbxRetrain.setChecked(False)
+                show_info('Cannot retrain when training from scratch')
         else:
             self.args.fromScratch=False
+
+
+    def setRetrain(self,state):
+        if self.args is None:
+            self.initArgs()
+        if state==Qt.Checked:
+            self.args.retrain=True
+            if self.chckbxScratch.isChecked():
+                self.chckbxScratch.setChecked(False)
+                show_info('Cannot train from scratch when retraining')
+        else:
+            self.args.retrain=False
 
 
     def setWrite(self,state):
@@ -9699,6 +9756,7 @@ class TrainWidget(QWidget):
         args.test=None
         args.results=None
         args.fromScratch=False
+        args.retrain=False
         self.args=args
 
 
