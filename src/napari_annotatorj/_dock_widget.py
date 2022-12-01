@@ -1556,8 +1556,16 @@ class AnnotatorJ(QWidget):
         # check if exists
         if not os.path.isfile(os.path.join(loadedROIfolder,loadedROIname)):
             # mask file doesn't exist
-            print(f'Mask image {loadedROIname} does not exist')
-            return
+            # try with every supported image extension
+            foundit=False
+            for e in self.imageExsts:
+                loadedROIname=os.path.splitext(self.defFile)[-2]+e
+                if os.path.isfile(os.path.join(loadedROIfolder,loadedROIname)):
+                    foundit=True
+                    break
+            if not foundit:
+                print(f'Mask image {loadedROIname} does not exist')
+                return
 
         importedMask=skimage.io.imread(os.path.join(loadedROIfolder,loadedROIname))
 
