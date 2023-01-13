@@ -14,7 +14,7 @@ from magicgui import magic_factory
 import os
 import skimage.io, skimage.util
 from roifile import ImagejRoi,ROI_TYPE,roiwrite,ROI_OPTIONS
-from napari.layers import Shapes, Image, Labels
+from napari.layers import Shapes, Image, Labels, Layer
 import numpy
 from qtpy.QtCore import Qt,QSize,QRect,Signal
 from qtpy.QtGui import QPixmap,QCursor,QIcon
@@ -1315,6 +1315,12 @@ class AnnotatorJ(QWidget):
 
             if contour:
                 # not empty
+                if len(contour)>1:
+                    # select largest contour from the list
+                    # this can happen when the mask contains a hole
+                    f=(lambda x: len(x))
+                    lengths=[f(c) for c in contour]
+                    contour=contour[lengths.index(max(lengths))]
                 shape=numpy.array(numpy.fliplr(numpy.squeeze(contour)))
                 shapes.append(shape)
                 if layerName=='ROI':
@@ -1682,14 +1688,14 @@ class AnnotatorJ(QWidget):
                 x.visible=False
 
 
-    def popLayerSelector(self,layerType=Image):
+    def popLayerSelector(self,layerType=Image,layerName='Image'):
         # build a modal dialog where the layer can be chosen
         self.layerChooserDialog=QDialog()
         self.layerChooserDialog.setStyleSheet(get_stylesheet("dark"))
         self.layerChooserDialog.setModal(True)
-        self.layerChooserDialog.setWindowTitle('Image layer not initialized')
+        self.layerChooserDialog.setWindowTitle(f'{layerName} layer not initialized')
 
-        layerNamesLabel=QLabel(f'Select Image layer:')
+        layerNamesLabel=QLabel(f'Select {layerName} layer:')
         self.layerNamesBox=QComboBox()
         for el in self.layerList:
             self.layerNamesBox.addItem(el.name)
@@ -2067,6 +2073,97 @@ class AnnotatorJ(QWidget):
         print('Could not find the Labels layer')
 
 
+    def findAnyLayer(self):
+        # find an annot-like layer except image layers to fetch inited contassist contour or bbox from
+        layerType=None
+        for x in self.viewer.layers:
+            if (x.__class__ is Image):
+                # skip image layers
+                continue
+            elif (x.__class__ is Shapes):
+                # do sth
+                foundit=True
+                break
+            elif (x.__class__ is Labels):
+                # do sth
+                foundit=True
+                break
+            elif (x.__class__ is Layer):
+                # base layer class if nothing else matches
+                # do sth
+                foundit=True
+                break
+            else:
+                pass
+        if not foundit:
+            # log if the ROI layer could not be found
+            print('Could not find any annotation layer')
+            return None,None
+        else:
+            layerType=x.__class__.__name__
+            return x,layerType
+
+
+    def findAnyLayerAll(self):
+        # first try current layer
+        annotLayer=self.fetchCurrentLayer()
+        if annotLayer is not None:
+            return annotLayer,annotLayer.__class__.__name__
+        # find an annot-like layer except image layers to fetch inited contassist contour or bbox from
+        layerType=None
+        annotLayersList,foundit=self.listAllAnnotLayers()
+        if not foundit:
+            # log if the ROI layer could not be found
+            print('Could not find any annotation layer')
+            return None,None
+        else:
+            self.layerList=annotLayersList
+            x=self.popLayerSelector(layerType=Layer,layerName='Annotation')
+            if x is None:
+                return None,None
+
+        success=self.initAnnotLayer(x)
+        if success:
+            layerType=x.__class__.__name__
+            return x,layerType
+        else:
+            return None,None
+
+
+    def listAllAnnotLayers(self):
+        foundit=False
+        annotLayersList=[]
+        for x in self.viewer.layers:
+            if (x.__class__ is Image):
+                # skip image layers
+                continue
+            elif (x.__class__ is Shapes or x.__class__ is Labels or x.__class__ is Layer):
+                foundit=True
+                annotLayersList.append(x)
+            else:
+                pass
+
+        if not foundit:
+            x=None
+
+        return annotLayersList,foundit
+
+
+    def initAnnotLayer(self,layer):
+        # TODO
+        print(f'initing annot layer {layer}...')
+        return True
+
+
+    def fetchCurrentLayer(self):
+        x=self.viewer.layers.selection._current
+        if x is not None or x!=[]:
+            print(f'current layer is: {x}')
+            return x
+        else:
+            return None
+
+
     def addROIdata(self,layer,rois):
         roiType='polygon' # default to this
         #self.defColour='white'
@@ -2317,11 +2414,16 @@ class AnnotatorJ(QWidget):
 
     def addFreeROIdrawingCA(self,shapesLayer=None):
         if shapesLayer is not None:
-            #shapesLayer.events.data.connect(self.contAssistROI,position='last')
-            #shapesLayer.mouse_drag_callbacks.append(self.freeHandROI)
-            shapesLayer.mouse_drag_callbacks.append(self.freeHandROIvis)
-            shapesLayer.mouse_drag_callbacks.append(self.addedNewBBox4UnetPred)
-            shapesLayer.mouse_drag_callbacks.append(self.editROI)
+            if isinstance(shapesLayer,Shapes):
+                #shapesLayer.events.data.connect(self.contAssistROI,position='last')
+                #shapesLayer.mouse_drag_callbacks.append(self.freeHandROI)
+                shapesLayer.mouse_drag_callbacks.append(self.freeHandROIvis)
+                shapesLayer.mouse_drag_callbacks.append(self.addedNewBBox4UnetPred)
+                shapesLayer.mouse_drag_callbacks.append(self.editROI)
+            elif isinstance(shapesLayer,Labels):
+                shapesLayer.mouse_drag_callbacks.append(self.startContAssistOnLabel)
+            elif isinstance(shapesLayer,Layer):
+                shapesLayer.mouse_drag_callbacks.append(self.startContAssistOnAnyLayer)
         else:
             return
         return
@@ -2556,6 +2658,28 @@ class AnnotatorJ(QWidget):
                 self.editROIidx=-1
 
 
+    # start contassist fcn after new drawing on label layer
+    def startContAssistOnLabel(self,layer,event):
+        yield
+        if layer.mode=='paint':
+            dragged=False
+            
+            # on move
+            while event.type == 'mouse_move':
+                dragged = True
+                yield
+            # on release
+            if dragged:
+                # drag ended
+
+                if self.contAssist and not self.inAssisting:
+                    self.contAssistROI()
+                pass
+
+
+    def startContAssistOnAnyLayer(self,layer,event):
+        # TODO
+        yield
     
 
     def invertColour(self,origColour):
@@ -2978,6 +3102,8 @@ class AnnotatorJ(QWidget):
             self.prevTool=None
         if not self.allowContAssistBbox:
             contAssistLayer.mode='add_polygon'
+        else:
+            contAssistLayer.mode='add_rectangle'
 
         # bring the ROI layer forward
         self.viewer.layers.selection.add(contAssistLayer)
@@ -2991,27 +3117,63 @@ class AnnotatorJ(QWidget):
 
         roiLayer=self.findROIlayer(layerName='contourAssist')
         if roiLayer is None:
-            print('No ROI layer found for contour assist (contourAssist)')
-            return
+            # try to find a base layer to fetch the inited contour from
+            roiLayer,layerType=self.findAnyLayerAll()
+            if roiLayer is None:
+                print('No ROI layer found for contour assist (contourAssist)')
+                return
+            else:
+                # found a custom roiLayer
+                if layerType=='Shapes':
+                    if (roiLayer.mode=='select' and not self.inAssisting):
+                        msg='Cannot start contour assist. Please select {}'.format('\'Add polygons(P)\'')
+                        show_warning(msg)
+                        return
+                    elif (roiLayer.mode=='add_polygon' and not self.inAssisting):
+                        # freehand drawing
+                        pass
+                    elif (roiLayer.mode=='add_rectangle' and not self.inAssisting and self.allowContAssistBbox):
+                        # drawing bboxes
+                        pass
+                    else:
+                        # unexpected tool selected
+                        msg='Cannot start contour assist. Please select {}'.format('\'Add polygons(P)\'')
+                        show_warning(msg)
+                        return
+
+                elif layerType=='Labels':
+                    if roiLayer.mode!='paint' and not self.inAssisting:
+                        msg='Cannot start contour assist. Please select {}'.format('\'paint\'')
+                        show_warning(msg)
+                        return
+                elif layerType=='Layer':
+                    # base layer
+                    # TODO
+                    msg='Cannot start contour assist. Base layer not supported yet'
+                    show_warning(msg)
+                    return
+                else:
+                    print(f'Cannot handle layer of type {layerType}')
+                    return
         else:
             self.prevTool=roiLayer.mode
 
-        if roiLayer.mode=='select' and not self.inAssisting:
-            msg='Cannot start contour assist when {} is selected. Please select {}'.format(
-                '\'Select shapes(5)\'','\'Add polygons(P)\'')
-            show_warning(msg)
-            return
-        elif roiLayer.mode!='add_polygon' and not self.inAssisting:
-            if roiLayer.mode=='add_rectangle' and not self.inAssisting and self.allowContAssistBbox:
-                print('Using bboxes in Contour assist mode')
-            else:
-                msg='Cannot start contour assist. Please select {}'.format('\'Add polygons(P)\'')
+            if roiLayer.mode=='select' and not self.inAssisting:
+                msg='Cannot start contour assist when {} is selected. Please select {}'.format(
+                    '\'Select shapes(5)\'','\'Add polygons(P)\'')
                 show_warning(msg)
                 return
-        elif self.inAssisting:
-            # do nothing on mouse release
-            print('---- already inAssisting ----')
-            return
+            elif roiLayer.mode!='add_polygon' and not self.inAssisting:
+                if roiLayer.mode=='add_rectangle' and not self.inAssisting and self.allowContAssistBbox:
+                    print('Using bboxes in Contour assist mode')
+                else:
+                    msg='Cannot start contour assist. Please select {}'.format('\'Add polygons(P)\'')
+                    show_warning(msg)
+                    return
+            elif self.inAssisting:
+                # do nothing on mouse release
+                print('---- already inAssisting ----')
+                return
 
         #yield
 
@@ -3030,7 +3192,10 @@ class AnnotatorJ(QWidget):
         
 
         # get current selection as init contour
-        curROI=roiLayer.data[-1] if len(roiLayer.data)>0 else None
+        if not isinstance(roiLayer,Shapes):
+            curROI=roiLayer.data
+        else:
+            curROI=roiLayer.data[-1] if len(roiLayer.data)>0 else None
         if curROI is None:
             print('Empty ROI')
         else:
@@ -3079,8 +3244,18 @@ class AnnotatorJ(QWidget):
                     elif roiLayer.mode=='add_rectangle':
                         curROIdata=[curROI]
                         objMode=1 # bboxes
+                    elif roiLayer.mode=='paint':
+                        # Labels layer drawing
+                        curROIdata=[curROI]
+                        objMode=2
+                    else:
+                        # handle custom Layer drawing
+                        # TODO
+                        print(f'annotation layer mode {roiLayer.mode} not supported yet')
+                        return
                     # delete temp init roi
-                    roiLayer.data=[]
+                    if isinstance(roiLayer,Shapes):
+                        roiLayer.data=[]
                     newROI=self.contourAssistUNet(imageLayer.data,curROI,curROIdata[0],self.intensityThreshVal,self.distanceThreshVal,jsonFileName,modelFileName,objMode)
                 elif self.selectedCorrMethod==1:
                     # region growing
@@ -3100,10 +3275,27 @@ class AnnotatorJ(QWidget):
 
                 # clean up
                 self.cleanUpAfterContAssist(None,roiLayer)
+            elif newROI is False:
+                # popup to select drawings from bboxes
+                selectionShapesLayer=self.findROIlayer(layerName='selectBox')
+                if selectionShapesLayer is not None:
+                    show_info('Select a bbox for prediction')
+                    self.selectDrawingBbox(selectionShapesLayer)
+
+                    #self.viewer.layers.selection.active=curLayer
+                    #curLayer.mode=prevTool
+                else:
+                    print(f'Cannot find layer \'selectBox\' to select bounding boxes from')
             else:
                 # display this contour
                 try:
-                    roiLayer.add_polygons(newROI)
+                    if not isinstance(roiLayer,Labels):
+                        roiLayer.add_polygons(newROI)
+                    else:
+                        roiLayer=Shapes(shape_type='polygon',name='contourAssist',data=newROI)
+                        self.viewer.add_layer(roiLayer)
+                        roiLayer.mode='add_polygon'
+                        roiLayer.mouse_drag_callbacks.append(self.freeHandROIvis)
                 except Exception as ex:
                     print(ex)
                     self.invertedROI=None
@@ -3117,7 +3309,8 @@ class AnnotatorJ(QWidget):
 
                 labels = roiLayer.to_labels([s[0], s[1]])
                 # delete this temp shape layer
-                self.viewer.layers.remove(roiLayer)
+                if roiLayer.name=='contourAssist' or roiLayer.name=='selectBox':
+                    self.viewer.layers.remove(roiLayer)
                 #roiLayer.visible=False
                 # convert to labels layer
                 labelLayer = self.viewer.add_labels(labels, name='editing')
@@ -3681,14 +3874,63 @@ class AnnotatorJ(QWidget):
         if not self.allowContAssistBbox or objectMode==0:
             x,y,w,h=cv2.boundingRect(initROIdata) # how to add this bbox: rect=shapes.add_rectangles([[y,x],[y+h,x+w]])
         else:
-            x=int(initROIdata[0][0])
-            y=int(initROIdata[0][1])
-            w=abs(int(initROIdata[1][1]-initROIdata[0][1]))
-            h=abs(int(initROIdata[2][0]-initROIdata[0][0]))
-            # swap coords
-            tmp=x
-            x=copy(y)
-            y=copy(tmp)
+            contAssistLayer=self.viewer.layers.selection.active
+            #if self.allowContAssistBbox and objectMode==1: # was or
+            if objectMode==1:
+                if contAssistLayer.name=='contourAssist' and self.allowContAssistBbox:
+                    #x=int(initROIdata[0][0])
+                    #y=int(initROIdata[0][1])
+                    # bbox can be drawn from any corner, find its min
+                    x=int(numpy.min(initROIdata[:,0]))
+                    y=int(numpy.min(initROIdata[:,1]))
+                    w=abs(int(initROIdata[1][1]-initROIdata[0][1]))
+                    h=abs(int(initROIdata[2][0]-initROIdata[0][0]))
+                    # swap coords
+                    tmp=x
+                    x=copy(y)
+                    y=copy(tmp)
+                elif self.allowContAssistBbox:
+                    x=int(numpy.min(initROIdata[:,0]))
+                    y=int(numpy.min(initROIdata[:,1]))
+                    w=abs(int(initROIdata[2][1]-initROIdata[0][1]))
+                    h=abs(int(initROIdata[2][0]-initROIdata[0][0]))
+                    #w=abs(int(initROIdata[1][0]-initROIdata[0][0]))
+                    #h=abs(int(initROIdata[2][1]-initROIdata[0][1]))
+                    # swap coords
+                    tmp=x
+                    x=copy(y)
+                    y=copy(tmp)
+
+            elif objectMode==2:
+                # Labels layer drawing
+                # d is labellayer.data
+                s=numpy.zeros((initROI.shape[0],initROI.shape[1]),dtype=numpy.uint8)
+                from scipy.ndimage import binary_fill_holes
+                binary_fill_holes(initROI,output=s)
+                initROI=s
+                contours,h=cv2.findContours(initROI.astype(numpy.uint8),cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+
+                if len(contours)==1:
+                    # only 1 drawing found
+                    x,y,w,h=cv2.boundingRect(contours[0])
+                else:
+                    # multiple drawings, let the user select which one to proceed with
+                    curLayer=self.viewer.layers.selection.active
+                    prevTool=curLayer.mode
+                    selectionShapesLayer=Shapes(shape_type='rectangle',name='selectBox')
+                    for ci in contours:
+                        x,y,w,h=cv2.boundingRect(ci)
+                        selectionShapesLayer.add_rectangles([[y,x],[y+h,x+w]])
+                    self.viewer.add_layer(selectionShapesLayer)
+
+                    # here must wait for the user to select a bbox
+                    #self.showSelectBboxPopup()
+                    print('Select a bounding box')
+
+                    return False
+                    # check False on fcn return, then run again with the selected bbox
+
         initBbox.append(x)
         initBbox.append(y)
         initBbox.append(w)
@@ -4164,7 +4406,7 @@ class AnnotatorJ(QWidget):
 
     def addContAssistLayer(self):
         shapesLayer=self.findROIlayer()
-        curColour=shapesLayer._data_view._edge_color[-1] if len(shapesLayer.data)>0 else 'white'
+        curColour=shapesLayer._data_view._edge_color[-1] if (shapesLayer is not None and len(shapesLayer.data)>0) else 'white'
         # create temp layer for contour assist
         contAssistLayer=self.findROIlayer(layerName='contourAssist')
         if contAssistLayer is not None:
@@ -4250,6 +4492,57 @@ class AnnotatorJ(QWidget):
 
                 print(f'starting contAssistROI on drawn bbox {newBbox}')
                 self.contAssistROI()
+
+
+    def selectDrawingBbox(self,shapesLayer):#,queue):
+        # shapesLayer has multiple rectangles
+        # the user must click on one to select it
+        shapesLayer.mode='select'
+
+        # wait for the user to select a bbox
+        shapesLayer.mouse_drag_callbacks.append(self.selectedBBox4UnetPred)
+
+        return True
+
+
+    def selectedBBox4UnetPred(self,layer,event):
+        # TODO
+        yield
+
+        if len(layer.selected_data)>0:
+            idx=layer.selected_data.pop()
+            selectedROI=layer.data[idx]
+            if selectedROI is not None:
+                x=selectedROI[0,0]
+                y=selectedROI[0,1]
+                h=selectedROI[1,0]-selectedROI[0,0]
+                w=selectedROI[2,1]-selectedROI[0,1]
+                show_info(f'Selected #{idx} ROI')
+                #print(f'Selected #{idx} ROI')
+                print(f'selectedROI:\n{selectedROI}')
+                print(f'({x},{y}) {w}x{h}')
+
+                #return x,y,w,h
+                
+                # delete all other bboxes and set tool to rectangle
+                layer.mode='add_rectangle'
+                layer.data=[layer.data[idx]]
+                self.contAssistROI()
+        else:
+            show_warning('Please click on a bbox')
+
+
+    def showSelectBboxPopup(self):
+        selectBboxPopup=QDialog()
+        selectBboxPopup.setModal(True)
+        selectBboxPopup.setWindowTitle('Select a bounding box')
+        selectBboxPopup.setStyleSheet(get_stylesheet('dark'))
+        lblGuide=QLabel('Select a bbox where you would like to<br>see a prediction with the model<br>Press "Esc" to continue')
+        layout=QVBoxLayout()
+        layout.addWidget(lblGuide)
+        selectBboxPopup.setLayout(layout)
+        selectBboxPopup.show()
+        selectBboxPopup.exec()
 
 
     def contourAssist(self,imageData,curROI,intensityThreshVal,distanceThreshVal):
@@ -5092,8 +5385,12 @@ class AnnotatorJ(QWidget):
 
 
     # listeners for layer events
-    def layerInserted(self):
+    def layerInserted(self,event):
         print('new layer inserted')
+        newLayer=self.viewer.layers[-1]
+        print(newLayer)
+        print(f'event: {event}')
+        self.addFreeROIdrawingCA(shapesLayer=newLayer)
         print(self.viewer.layers)
 
 

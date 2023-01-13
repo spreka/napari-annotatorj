@@ -88,7 +88,7 @@ napari-annotatorj has several convenient functions to speed up the annotation pr
 
 Freehand drawing is enabled in the plugin. The "Add polygon" tool is selected by default upon startup. To draw a freehand object (shape) simply hold the mouse and drag it around the object. The contour is visualized when the mouse button is released.
 
-See the [guide](#how-to-annotate) below for a quick start or a [demo](#demo).
+See the [guide](#how-to-annotate) below for a quick start or a [demo](#demo). See [shortcuts](#shortcuts) for easy operation.
 
 ***
 ## How to annotate
@@ -308,7 +308,119 @@ You can also train a new model on your own data in e.g. Python and save it with 
 	model.save_weights(‘model_real_weights.h5’)
 
 ```
-This configuration will change in the next release to allow model browse and custom model name in an options widget.
+You can also train in the [train widget](#Training).
+
+This configuration will change in the next release to allow model browse and custom model name in an [options widget](#options).
+
+***
+## Training
+To start training a new model or refine an existing one click the **Train** button on the right of the napari-annotatorj widget. This will open the training widget where you can set input paths and training options. During training a progress bar will show the epochs passed and plot the loss on a graph. See a [guide](#how-to-train) below.
+
+The trained model will be saved to the `model` folder under the located training data folder which is named `training` by default when preparing data. Each new training will be saved to a new training folder with increased numbering e.g. `training_1`, `training_2` etc.
+
+When an existing training data folder is browsed with the "Browse train ..." button, the `model` folder will be created under it without an additiona `training` folder.
+
+After training is finished, a message is shown to indicate the newly trained model can be tested by drawing bounding boxes (rectangles) to initiate [contour assist](#contour-assist-mode) prediction. The presented region on the editing layer (Label layer) can be modified with the paint brush tool (automatically selected) as in [contour assist](#contour-assist-mode).
+
+The trained model can be further refined by selecting the "Retrain latest" checkbox from the [training parameters](#training-parameters) (⚙ button on the right).
+
+To use this new model for annotation in [contour assist mode](#contour-assist-mode), you mush set the model path in the [Options widget](#options) or in the configuration file (see how to [here](#configure-model-folder)), then restart napari.
+
+### How to train
+1. On current annotation
+	1. "Use current annotation" checkbox --> use this image and its current annotation for training
+	2. Prep data --> prepare data to [suitable format](#training-data-format)
+	3. (optional) ⚙ --> [set parameters](#training-parameters)
+	4. Start --> start training
+2. Additional data
+	1. Select images and annotations to use for training
+		- Browse original ... --> locate folder of original images
+		- Browse annot ... --> locate folder of annotations
+		- Prep data --> prepare data to [suitable format](#training-data-format)
+	2. Browse train ... --> select already prepared training data
+	3. (optional) ⚙ --> [set parameters](#training-parameters)
+	4. Start --> start training
+
+### Training data format
+The data format expected by the training widget is as follows.
+
+```
+images
+	|--- image1.png
+	|--- another_image.png
+	|--- something.png
+	|--- ...
+
+unet_masks
+	|--- image1.tiff
+	|--- another_image.tiff
+	|--- something.tiff
+	|--- ...
+```
+
+Masks are 8-bit binary (black and white) .tiff images that can be exported from the [Exporter widget](#export) selecting the Semantic (binary) export option. When the "Prep data" button is clicked in the Training widget, these folders are automatically created from the located annotation files and original images.
+
+### Training parameters
+The following configurable parameters can be set after clicking on the ⚙ icon:
+| Parameter | Description | Default value |
+| --------- | ----------- | ------------- |
+| Epochs | number of epochs to train | 5 |
+| Steps | number of steps in each epoch | 1 |
+| Batch size | number of samples in an iteration| 1 |
+| Image size | size of training images | 256 |
+| Start from scratch | train a new model from scratch| `False` |
+| Retrain latest | re-fine latest training | `False` |
+| Write pred | write test image prediction to file| `False` |
+| Test image | path to test image | `None`|
+
+Note: by default CPU will be used for training. This can be changed to GPU in the [Options widget](#options) if your computer has a capable CUDA-device.
+
+***
+## Options
+Settings found in the configuration file can be set in the Options widget opened with the "..." button on the right of the main plugin. For changes to take effect you must save your changes with the "Ok" button at the bottom of the Options widget.
+
+The following options can be configured:
+|Group|Option|Description|Default|Valid values|
+|-----|------|-----------|-------|------------|
+|General|Annotation type | see [instance](#instance-annotation), [bbox](#bounding-box-annotation), [semantic](#semantic-annotation) | instance |instance, bbox, semantic |
+| |Remember annotation type|use the same annotation type on next startup|`True`|`True`, `False`|
+| |Colours|select annotation and overlay colours; see [here](#change-colours)|white|white, red, green, blue, cyan, magenta, yellow, orange, black|
+| |Classes|names of folders to save annotations when not classified*|normal|(any string)**|
+|Semantic segmentation|Brush size|size of the brush|50|`int`|
+|*Advanced settings*|
+|Contour assist|Max distance|number of pixels to extend the initial contour with|17|`int`|
+||Threshold|intensity threshold after prediction|||
+||- gray||0.1|`float` in [0,1]|
+||- R (red)||0.2|`float` in [0,1]|
+||- G (green)||0.4|`float` in [0,1]|
+||- B (blue)||0.2|`float` in [0,1]|
+||Brush size|correction brush size|5|`int`|
+||Method|contour assist prediction method|U-Net|U-Net, Classic***|
+||Model|U-Net model to use for Contour assist prediction|||
+||folder|path to the model folder|`user/.napari_annotatorj/models`|existing `models` folder path|
+||.json file|name of the model .json file **without** extension|model_real|any string**|
+||weights file|name of the model weights file|model_real_weights.h5|any string**|
+||full file|name of the combined config+weights file|model_real.hdf5|any string**|
+||Device|computation device to perform prediction|cpu|cpu,`int`****|
+|Mask/text import|
+||Auto mask load|load annotation files automatically when a new image is opened|`False`|`True`, `False`|
+||Enable mask load|load instance annotation mask image|`False`|`True`, `False`|
+||Enable text load|load object detection bounding box coordinate text file|`False`|`True`, `False`|
+||Method|load as editable or overlay|load|load, overlay|
+|Others|
+||Save outlines|save image with annotations outlined|`False`|`True`, `False`|
+||Show help on startup|show the help window upon every startup|`False`|`True`, `False`|
+||Save annot times|save annotation times to text file*****|`False`|`True`, `False`|
+
+*: right click the last element (other...) to add a new item to the list. When annotations are assigned class labels in [class mode](#class-mode), they will be saved to the folder `masks` by default.
+
+**: do not use whitespace (' ') if possible
+
+***: region growing classical algorithm
+
+****: valid id of a GPU device e.g. `0` or `3`; if your computer has only one GPU the id is `0`
+
+*****: currently disabled, used for development
 
 ***
 ## Demo
@@ -324,6 +436,22 @@ Alternatively, you can startup the napari-annotatorj plugin by running
     # from the napari-annotatorj folder
 	python src/napari_annotatorj/startup_annotatorj.py
 ```
+
+***
+## Shortcuts
+
+| Function | Shortcut |
+| -------- | -------- |
+| Contour assist | `a` |
+| Class mode | `c` |
+| Edit mode | `Shift` + `e` |
+| Show contours | `Shift` + `v` |
+| Accept Contour assist | `q` |
+| Reject Contour assist | `Ctrl` + `del` |
+| Invert Contour assist | `u` |
+| Erase in Edit/Contour assist mode | `Alt` (hold) |
+| Revert changes in Edit mode | `Esc` |
+
 
 ***
 ## Setting device for deep learning model prediction
