@@ -94,9 +94,15 @@ class AnnotatorJ(QWidget):
         self.autoMaskLoad=False
         self.maskFolderInited=False
         self.maskFolderInitedPath=None
+        self.overlayFolderInited=False
+        self.overlayFolderInitedPath=None
+        self.roiFolderInited=False
+        self.roiFolderInitedPath=None
         self.loadOrOverlay='load'
 
         self.enableTextLoad=False
+
+        self.autoROIload=False
 
         self.inAssisting=False
         self.addAuto=False
@@ -173,6 +179,8 @@ class AnnotatorJ(QWidget):
 
         self.prevTool=None
 
+        self.shapeControls=None
+
         # options
         self.optionsFrame=None
         self.selectedAnnotationType='instance'
@@ -198,6 +206,8 @@ class AnnotatorJ(QWidget):
         self.helpWidget=None
         self.trainWidget=None
         self.q3dWidget=None
+        self.fileListWidget=None
+        self.fileListWidgetw=None
 
 
         # get a list of the 9 basic colours also present in AnnotatorJ's class mode
@@ -310,6 +320,9 @@ class AnnotatorJ(QWidget):
         self.roiLabel=QLabel('ROIs')
         self.lblCurrentFile=QLabel('(1/1) [image name]')
         self.lblCurrentFile.setToolTip('(no image opened)')
+        # add right-click option to open file list widget
+        self.lblCurrentFile.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.lblCurrentFile.customContextMenuRequested.connect(self.addFileListWidget)
 
         self.logo=QLabel()
         max_size=QSize(250,250)
@@ -488,6 +501,11 @@ class AnnotatorJ(QWidget):
         # finish initializing params and checkboxes
         # moved to its own fcn
         self.finishOpenNewInit()
+
+        if self.fileListWidget is not None and self.fileListWidget.fileFolder!=self.defDir:
+            # reinit the file list
+            self.fileListWidget.closeFileListWidget()
+            self.fileListWidget=FileListWidget(self.viewer,self)
 
 
     def preInitChkBxs(self):
@@ -705,6 +723,7 @@ class AnnotatorJ(QWidget):
             if self.selectedAnnotationType=='instance':
                 layer.bind_key('a',func=self.toggleContAssistMode,overwrite=True)
             layer.bind_key('Shift-e',func=self.toggleEditMode,overwrite=True)
+            #layer.bind_key('Shift-d',func=self.toggleDisplayText,overwrite=True)
         elif type(layer) is Labels:
             # add Labels-specific shortcuts here
             pass
@@ -868,6 +887,8 @@ class AnnotatorJ(QWidget):
         # reinit class mode
         if self.classMode and (self.selectedAnnotationType=='bbox' or self.selectedAnnotationType=='instance'):
             self.chckbxClass.setChecked(False)
+            self.chckbxClass.setChecked(True)
+            show_info('Press "P" to draw, "5" to classify')
 
         # enable shortcut for checkbox modes
         if self.selectedAnnotationType=='instance' or self.selectedAnnotationType=='bbox':
@@ -949,41 +970,68 @@ class AnnotatorJ(QWidget):
             loadedROIfolder=None
             if self.enableMaskLoad or self.enableTextLoad:
                 # init mask folder selection either way
-                if self.maskFolderInited:
-                    # no need to open the dialog again
-                    loadedROIfolder=self.maskFolderInitedPath
-                else:
-                    # browse mask folder
-                    loadedROIfolder=QFileDialog.getExistingDirectory(self,"Select folder of exported annotation files",self.defDir,QFileDialog.ShowDirsOnly)
-                    if os.path.isdir(loadedROIfolder):
-                        print('Opened annotation file folder: {}'.format(loadedROIfolder))
+                if not self.autoROIload and self.loadOrOverlay=='load':
+                    # loading masks
+                    if self.maskFolderInited:
+                        # no need to open the dialog again
+                        loadedROIfolder=self.maskFolderInitedPath
                     else:
-                        print('Failed to open annotation file folder')
-                        return
+                        # browse mask folder
+                        loadedROIfolder=QFileDialog.getExistingDirectory(self,"Select folder of exported annotation files",self.defDir,QFileDialog.ShowDirsOnly)
+                        if os.path.isdir(loadedROIfolder):
+                            print('Opened annotation file folder: {}'.format(loadedROIfolder))
+                        else:
+                            print('Failed to open annotation file folder')
+                            return
+                
+                elif self.autoROIload and self.loadOrOverlay=='overlay':
+                    # loading rois
+                    if self.roiFolderInited:
+                        # no need to open the dialog again
+                        loadedROIfolder=self.roiFolderInitedPath
+                    else:
+                        # browse roi folder
+                        loadedROIfolder=QFileDialog.getExistingDirectory(self,"Select folder of annotation .zip files",self.defDir,QFileDialog.ShowDirsOnly)
+                        if os.path.isdir(loadedROIfolder):
+                            print('Opened annotation file folder: {}'.format(loadedROIfolder))
+                        else:
+                            print('Failed to open annotation file folder')
+                            return
 
-            if self.enableMaskLoad:
+
+            if self.loadOrOverlay=='load' and self.enableMaskLoad:
                 # TODO
 
                 # moved to its own fcn
                 loadedAutoRoi=self.loadRoisFromMask(loadedROIfolder,loadedAutoRoi)
 
-            elif self.enableTextLoad and not loadedAutoRoi:
+            elif self.loadOrOverlay=='load' and self.enableTextLoad and not loadedAutoRoi:
 
                 # moved to its own fcn
                 self.loadRoisFromCoords(loadedROIfolder)
 
 
             else:
-                # normal way, import ROI.zip file
-                roiFileName,_=QFileDialog.getOpenFileName(
-                    self,"Select an annotation (ROI) .zip file",
-                    str(os.path.join(self.defDir,self.defFile)),"Archives (*.zip)")
+                # auto load roi
+                if self.autoROIload and self.loadOrOverlay=='overlay':
+                    roiFileName=os.path.join(loadedROIfolder,os.path.splitext(self.defFile)[-2]+'_ROIs.zip')
+                    # TODO: check if other .zips exist
+
+                else:
+                    # normal way, import ROI.zip file
+                    roiFileName,_=QFileDialog.getOpenFileName(
+                        self,"Select an annotation (ROI) .zip file",
+                        str(os.path.join(self.defDir,self.defFile)),"Archives (*.zip)")
                 print(roiFileName)
                 if os.path.exists(roiFileName):
                     loadedROIfolder=os.path.dirname(roiFileName)
                     loadedROIname=os.path.basename(roiFileName)
                     rois=ImagejRoi.fromfile(roiFileName)
                     print('Opened ROI: {}'.format(roiFileName))
+
+                    if self.autoROIload and self.loadOrOverlay=='overlay':
+                        self.roiFolderInited=True
+                        self.roiFolderInitedPath=loadedROIfolder
                 else:
                     print('Failed to open ROI .zip file: {}'.format(roiFileName))
                     return
@@ -1540,8 +1588,14 @@ class AnnotatorJ(QWidget):
             return
         else:
             print(f'Imported ROIs from coordinates text file: {loadedROIname}')
-            self.maskFolderInited=True
-            self.maskFolderInitedPath=loadedROIfolder
+            if layerName=='ROI':
+                self.maskFolderInited=True
+                self.maskFolderInitedPath=loadedROIfolder
+            elif layerName=='overlay':
+                self.overlayFolderInited=True
+                self.overlayFolderInitedPath=loadedROIfolder
+            else:
+                print('unexpected layer name for importing rois from coords')
         
         shapesLayer=self.findROIlayer(layerName=layerName)
         if self.showCnt:
@@ -1581,8 +1635,14 @@ class AnnotatorJ(QWidget):
             return
         else:
             print(f'Imported ROIs from mask file: {loadedROIname}')
-            self.maskFolderInited=True
-            self.maskFolderInitedPath=loadedROIfolder
+            if layerName=='ROI':
+                self.maskFolderInited=True
+                self.maskFolderInitedPath=loadedROIfolder
+            elif layerName=='overlay':
+                self.overlayFolderInited=True
+                self.overlayFolderInitedPath=loadedROIfolder
+            else:
+                print('unexpected layer name for importing rois from mask')
         
         shapesLayer=self.findROIlayer(layerName=layerName)
         if self.showCnt:
@@ -1889,6 +1949,7 @@ class AnnotatorJ(QWidget):
                 'enableMaskLoad':self.enableMaskLoad,
                 'enableTextLoad':self.enableTextLoad,
                 'loadOrOverlay':self.loadOrOverlay,
+                'autoROIload':self.autoROIload,
                 'saveOutlines':self.saveOutlines,
                 'gpuSetting':self.gpuSetting,
                 'showHelp':self.showHelpOnStartup
@@ -1955,6 +2016,8 @@ class AnnotatorJ(QWidget):
                 # set to default
                 self.loadOrOverlay='load'
 
+        if 'autoROIload' in params and isinstance(params['autoROIload'],bool):
+            self.autoROIload=params['autoROIload']
         if 'saveOutlines' in params and isinstance(params['saveOutlines'],bool):
             self.saveOutlines=params['saveOutlines']
         if 'gpuSetting' in params:
@@ -1994,6 +2057,16 @@ class AnnotatorJ(QWidget):
             except Exception as e:
                 print(e)
                 print('Could not write configs to file')
+
+
+    def bringLayer2front(self,layer):
+        # bring it to the front
+        n=len(self.viewer.layers)
+        xLayerIdx=self.viewer.layers.index(layer)
+        if xLayerIdx!=n-1:
+            # need to move it
+            self.viewer.layers.selection.clear()
+            self.viewer.layers.move_selected(xLayerIdx, n-1) # n-1
 
 
     def findROIlayer(self,setLayer=False,layerName='ROI',quiet=False):
@@ -2392,6 +2465,7 @@ class AnnotatorJ(QWidget):
             shapesLayer.mouse_drag_callbacks.append(self.editROI)
             shapesLayer.mouse_drag_callbacks.append(self.limitBBox2ImageSize)
             #shapesLayer.mouse_drag_callbacks.append(self.limitROI2ImageSize)
+            shapesLayer.mouse_wheel_callbacks.append(self.resizeEdgeWidth)
         else:
             return
         return
@@ -2631,6 +2705,10 @@ class AnnotatorJ(QWidget):
                 labelLayer = self.viewer.add_labels(labels, name='editing')
 
                 roiLayer.visible=True
+
+                #self.viewer.layers.selection.clear()
+                #self.viewer.layers.selection.add(labelLayer)
+                self.bringLayer2front(labelLayer)
 
 
                 # set the tool for an editing-capable one
@@ -3478,6 +3556,47 @@ class AnnotatorJ(QWidget):
             return
 
 
+    def resizeEdgeWidth(self,layer,event):
+        if 'Shift' in event.modifiers:
+            # resize edge width accordingly
+            roiLayer=self.findROIlayer()
+            d=event.delta[1]
+            # change the edge width in the callback
+            self.annotEdgeWidth+=d
+            self.updateControls(layer.name)
+        else:
+            # do nothing
+            print('Hold Shift while scrolling to modify edge width')
+            pass
+
+
+    def updateControls(self,layerName):
+        from napari._qt.layer_controls.qt_shapes_controls import QtShapesControls
+
+        #shapeControls=None
+        if self.shapeControls is None:
+            for c in self.viewer.window._qt_viewer.controls.children():
+                if isinstance(c,QtShapesControls) and c.layer.name==layerName:
+                    self.shapeControls=c
+                    self.shapeControls.widthSlider.valueChanged.connect(self.updateEdgeWidths)
+                    break
+        if self.shapeControls is None:
+            print('Could not find the shapeControls')
+            return
+        else:
+            #self.shapeControls.changeWidth(self.annotEdgeWidth)
+            self.shapeControls.widthSlider.setValue(self.annotEdgeWidth)
+
+
+    def updateEdgeWidths(self,value):
+        roiLayer=self.findROIlayer()
+        for i in range(roiLayer.nshapes):
+            roiLayer._data_view.update_edge_width(i,value)
+        self.annotEdgeWidth=value
+        print(f'Set annotation edge width to {self.annotEdgeWidth}')
+        roiLayer.refresh()
+
+
     def quickExport(self):
         # save the ImageJ ROI files as when pressing the "Save" button
         self.saveData()
@@ -3683,19 +3802,27 @@ class AnnotatorJ(QWidget):
                 #self.imp=self.findImageLayer().data
 
                 # check if auto mask load is enabled
-                if self.enableMaskLoad and self.autoMaskLoad and self.maskFolderInited:
+                if self.enableMaskLoad and self.autoMaskLoad:# and self.maskFolderInited:
                     # load the mask from the selected folder automatically
-                    if self.loadOrOverlay=='load':
+                    if self.loadOrOverlay=='load' and self.maskFolderInited:
                         self.loadROIs()
-                    elif self.loadOrOverlay=='overlay':
+                    elif self.loadOrOverlay=='overlay' and self.overlayFolderInited:
                         self.setOverlay()
 
-                elif self.enableTextLoad and self.autoMaskLoad and self.maskFolderInited:
-                    # load the coordinates text file from the selected folder automatically
-                    if self.loadOrOverlay=='load':
+                    # load roi from the selected folder automatically
+                    if self.autoROIload and self.loadOrOverlay=='overlay' and self.roiFolderInited:
                         self.loadROIs()
-                    elif self.loadOrOverlay=='overlay':
+
+                elif self.enableTextLoad and self.autoMaskLoad:# and self.maskFolderInited:
+                    # load the coordinates text file from the selected folder automatically
+                    if self.loadOrOverlay=='load' and self.maskFolderInited:
+                        self.loadROIs()
+                    elif self.loadOrOverlay=='overlay' and self.overlayFolderInited:
                         self.setOverlay()
+
+                    # load roi from the selected folder automatically
+                    if self.autoROIload and self.loadOrOverlay=='overlay' and self.roiFolderInited:
+                        self.loadROIs()
 
                 return
 
@@ -3740,19 +3867,27 @@ class AnnotatorJ(QWidget):
                 #self.imp=self.findImageLayer().data
 
                 # check if auto mask load is enabled
-                if self.enableMaskLoad and self.autoMaskLoad and self.maskFolderInited:
+                if self.enableMaskLoad and self.autoMaskLoad:# and self.maskFolderInited:
                     # load the mask from the selected folder automatically
-                    if self.loadOrOverlay=='load':
+                    if self.loadOrOverlay=='load' and self.maskFolderInited:
                         self.loadROIs()
-                    elif self.loadOrOverlay=='overlay':
+                    elif self.loadOrOverlay=='overlay' and self.overlayFolderInited:
                         self.setOverlay()
 
-                elif self.enableTextLoad and self.autoMaskLoad and self.maskFolderInited:
-                    # load the coordinates text file from the selected folder automatically
-                    if self.loadOrOverlay=='load':
+                    # load roi from the selected folder automatically
+                    if self.autoROIload and self.loadOrOverlay=='overlay' and self.roiFolderInited:
                         self.loadROIs()
-                    elif self.loadOrOverlay=='overlay':
+
+                elif self.enableTextLoad and self.autoMaskLoad:# and self.maskFolderInited:
+                    # load the coordinates text file from the selected folder automatically
+                    if self.loadOrOverlay=='load' and self.maskFolderInited:
+                        self.loadROIs()
+                    elif self.loadOrOverlay=='overlay' and self.overlayFolderInited:
                         self.setOverlay()
+
+                    # load roi from the selected folder automatically
+                    if self.autoROIload and self.loadOrOverlay=='overlay' and self.roiFolderInited:
+                        self.loadROIs()
 
                 return
 
@@ -4642,6 +4777,7 @@ class AnnotatorJ(QWidget):
                     # refresh text props
                     layer.refresh()
                     layer.refresh_text()
+                    self.viewer.window.qt_viewer.layer_to_visual[layer].node._subvisuals[3].visible=False
                     #layer.mode='select'
                     #layer._set_highlight(force=True)
                     
@@ -5004,9 +5140,9 @@ class AnnotatorJ(QWidget):
         loadedROIfolder=None
         if self.enableMaskLoad or self.enableTextLoad:
             # init mask folder selection either way
-            if self.maskFolderInited:
+            if self.overlayFolderInited:
                 # no need to open the dialog again
-                loadedROIfolder=self.maskFolderInitedPath
+                loadedROIfolder=self.overlayFolderInitedPath
             else:
                 # browse mask folder
                 loadedROIfolder=QFileDialog.getExistingDirectory(self,"Select folder of exported annotation files",self.defDir,QFileDialog.ShowDirsOnly)
@@ -5306,6 +5442,18 @@ class AnnotatorJ(QWidget):
     def toggleShowContours(self,layer):
         self.chkShowContours.setChecked(not self.chkShowContours.isChecked())
 
+    def toggleDisplayText(self,layer):
+        if self.shapeControls is None:
+            self.updateControls(layer.name)
+
+        if self.shapeControls is not None:
+            curState=self.shapeControls.textDispCheckBox.isChecked()
+            self.shapeControls.textDispCheckBox.setChecked(not curState) #self.shapeControls.layer.text.visible #not curState
+            layer.refresh()
+        else:
+            print(f'Cannot find shapeControls for layer {layer.name}, please try again')
+
+
     def showOptionsWidget(self,layer):
         if self.optionsFrame is None:
             self.openOptionsFrame()
@@ -5352,6 +5500,8 @@ class AnnotatorJ(QWidget):
                 self.firstDockWidget=self.trainWidget
             elif newName=='3D':
                 self.firstDockWidget=self.q3dWidget
+            elif newName=="FileList":
+                self.firstDockWidget=self.fileListWidgetw
             elif newName=='Export' or newName=='napari-annotatorj: AnnotatorJExport':
                 # this should never happen
                 self.firstDockWidget=self.ExportWidget
@@ -5382,6 +5532,25 @@ class AnnotatorJ(QWidget):
 
     def open3DWidget(self):
         self.q3dWidget=Q3DWidget(self.viewer,self)
+
+
+    def addFileListWidget(self):
+        fileContextMenu=QMenu()
+        openAction=fileContextMenu.addAction('Open file list widget')
+        openAction.triggered.connect(self.openFileListWidget)
+        closeAction=fileContextMenu.addAction('Hide file list widget')
+        closeAction.triggered.connect(self.hideFileListWidget)
+        fileContextMenu.exec_(QCursor.pos())
+
+
+    def openFileListWidget(self):
+        print('opening the file list widget...')
+        self.fileListWidget=FileListWidget(self.viewer,self)
+
+
+    def hideFileListWidget(self):
+        if self.fileListWidget is not None and self.fileListWidget.isVisible:
+            self.fileListWidget.closeFileListWidget()
 
 
     # listeners for layer events
@@ -8039,6 +8208,12 @@ class OptionsFrame(QWidget):
         self.saveAnnotTimesChkBx.setEnabled(False)
         self.saveAnnotTimesChkBx.setStyleSheet("color: gray")
 
+        # enable roi auto roi load when stepping 
+        self.autoROIloadChkBx=QCheckBox('Auto ROI load')
+        self.autoROIloadChkBx.setToolTip('Load ROIs from .zip file automatically when stepping to the previous or next image')
+        self.autoROIloadChkBx.setChecked(self.annotatorjObj.autoROIload)
+        self.autoROIloadChkBx.stateChanged.connect(self.setAutoROIload)
+
         self.importLabel=QLabel('Mask / text import')
         self.importLabel.setToolTip('Mask image or text coordinate file import options')
 
@@ -8251,6 +8426,7 @@ class OptionsFrame(QWidget):
         self.advancedVBox.addWidget(self.restSeparator)
         self.advancedVBox.addLayout(self.importVBox)
         self.advancedVBox.addWidget(self.extraSeparator)
+        self.advancedVBox.addWidget(self.autoROIloadChkBx)
         self.advancedVBox.addLayout(self.outlinesHBox)
         self.advancedVBox.addLayout(self.helpHBox)
         self.advancedVBox.addLayout(self.timesHBox)
@@ -8332,6 +8508,7 @@ class OptionsFrame(QWidget):
         self.setEnableMaskLoadOpt()
         self.setEnableTextLoadOpt()
         self.setImportMethod()
+        self.setAutoROIloadOpt()
         self.setSaveOutlinesOpt()
         self.setShowHelpOpt()
         # write all settings to file
@@ -8749,6 +8926,15 @@ class OptionsFrame(QWidget):
         rbtn=self.sender()
         if rbtn.isChecked()==True:
             print(rbtn.text())
+
+        if rbtn.text()=='load':
+            if rbtn.isChecked()==True:
+                self.autoROIloadChkBx.setChecked(False)
+                self.autoROIloadChkBx.setEnabled(False)
+                self.autoROIloadChkBx.setStyleSheet("color: gray")
+            else:
+                self.autoROIloadChkBx.setEnabled(True)
+                self.autoROIloadChkBx.setStyleSheet("color: white")
         
 
     def setImportMethod(self):
@@ -8791,6 +8977,17 @@ class OptionsFrame(QWidget):
 
     def setShowHelpOpt(self):
         self.annotatorjObj.showHelpOnStartup=True if self.showHelpChkbx.isChecked() else False
+
+
+    def setAutoROIload(self,state):
+        if state==Qt.Checked:
+            print('Selected Auto ROI load')
+        else:
+            print('Cleared Auto ROI load')
+
+
+    def setAutoROIloadOpt(self):
+        self.annotatorjObj.autoROIload=True if self.autoROIloadChkBx.isChecked() else False
 
 
     def createLineSeparator(self,width=1,colour='gray'):
@@ -10190,6 +10387,138 @@ class Q3DWidget(QWidget):
 
 # -------------------------------------
 # end of class Q3DWidget
+# -------------------------------------
+
+
+class FileListWidget(QWidget):
+    def __init__(self,napari_viewer,annotatorjObj=None):
+        super().__init__()
+        self.viewer = napari_viewer
+        self.annotatorjObj=annotatorjObj
+
+        # check if there is opened instance of this frame
+        # the main plugin is: 'napari-annotatorj: Annotator J'
+        if self.annotatorjObj.fileListWidget is not None:
+            # already inited once, load again
+            print('detected that FileList widget has already been initialized')
+            if self.annotatorjObj.fileListWidget.isVisible() or 'FileList' in self.viewer.window._dock_widgets.data:
+                print('FileList widget is visible')
+                return
+            else:
+                print('FileList widget is not visible')
+                # rebuild the widget
+
+        print('in the class...')
+
+        self.fileList=FileListWidget.initFileList(self.annotatorjObj,self.fileListSelectionChanged)
+        self.fileFolder=self.annotatorjObj.defDir
+
+        self.mainVbox=QVBoxLayout()
+
+        self.filesMainOUterVbox=QVBoxLayout()
+        self.scroll=QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.inner = QFrame(self.scroll)
+        self.filesMainVbox=QVBoxLayout()
+        self.inner.setLayout(self.filesMainVbox)
+        self.scroll.setWidget(self.inner)
+
+        self.filesMainVbox.addWidget(self.fileList)
+
+        self.filesMainOUterVbox.addWidget(self.scroll)
+        self.setLayout(self.filesMainOUterVbox)
+
+
+        dw=self.viewer.window.add_dock_widget(self,name='FileList')
+        self.annotatorjObj.fileListWidgetw=dw
+        if self.annotatorjObj.firstDockWidget is None:
+            self.annotatorjObj.firstDockWidget=dw
+            self.annotatorjObj.firstDockWidgetName='FileList'
+        else:
+            try:
+                self.viewer.window._qt_window.tabifyDockWidget(self.annotatorjObj.firstDockWidget,dw)
+            except Exception as e:
+                print(e)
+                # RuntimeError: wrapped C/C++ object of type QtViewerDockWidget has been deleted
+                # try to reset the firstDockWidget manually
+                self.annotatorjObj.findDockWidgets('FileList')
+                try:
+                    if self.annotatorjObj.firstDockWidget is None:
+                        self.annotatorjObj.firstDockWidget=dw
+                        self.annotatorjObj.firstDockWidgetName='FileList'
+                    else:
+                        self.viewer.window._qt_window.tabifyDockWidget(self.annotatorjObj.firstDockWidget,dw)
+                except Exception as e:
+                    print(e)
+                    print('Failed to add widget FileList')
+
+
+    @staticmethod
+    def initFileList(annotatorjObj,callback):
+        fileList=QListWidget()
+        fileList.setSelectionMode(QAbstractItemView.SingleSelection)
+
+        for fi,f in enumerate(annotatorjObj.curFileList):
+            fileList.insertItem(fi,f)
+
+        fileList.setCurrentItem(fileList.item(annotatorjObj.curFileIdx))
+
+        fileList.currentItemChanged.connect(callback)
+
+        return fileList
+
+
+    def fileListSelectionChanged(self,item):
+        selectedIdx=self.fileList.currentRow()
+        
+        # mimic stepping fcn
+        self.annotatorjObj.stepping=True
+        self.annotatorjObj.curFileIdx=selectedIdx
+        self.annotatorjObj.defFile=self.annotatorjObj.curFileList[self.annotatorjObj.curFileIdx]
+        self.annotatorjObj.openNew()
+
+        # check if auto mask load is enabled
+        if self.annotatorjObj.enableMaskLoad and self.annotatorjObj.autoMaskLoad:# and self.annotatorjObj.maskFolderInited:
+            # load the mask from the selected folder automatically
+            if self.annotatorjObj.loadOrOverlay=='load' and self.annotatorjObj.maskFolderInited:
+                self.annotatorjObj.loadROIs()
+            elif self.annotatorjObj.loadOrOverlay=='overlay' and self.annotatorjObj.overlayFolderInited:
+                self.annotatorjObj.setOverlay()
+
+        elif self.annotatorjObj.enableTextLoad and self.annotatorjObj.autoMaskLoad:# and self.annotatorjObj.maskFolderInited:
+            # load the coordinates text file from the selected folder automatically
+            if self.annotatorjObj.loadOrOverlay=='load' and self.annotatorjObj.maskFolderInited:
+                self.annotatorjObj.loadROIs()
+            elif self.annotatorjObj.loadOrOverlay=='overlay' and self.annotatorjObj.overlayFolderInited:
+                self.annotatorjObj.setOverlay()
+
+
+    def closeEvent(self, event):
+        event.ignore()
+        self.closeFileListWidget()
+        #event.accept()
+
+
+    def closeFileListWidget(self):
+        try:
+            if self.annotatorjObj.firstDockWidgetName=='FileList':
+                self.annotatorjObj.findDockWidgets('FileList')
+            self.viewer.window.remove_dock_widget(self.annotatorjObj.fileListWidget)
+            self.annotatorjObj.fileListWidgetw=None
+        except Exception as e:
+            print(e)
+            try:
+                if self.annotatorjObj.firstDockWidgetName=='FileList':
+                    self.annotatorjObj.findDockWidgets('FileList')
+                self.viewer.window.remove_dock_widget('FileList')
+                self.annotatorjObj.fileListWidgetw=None
+            except Exception as e:
+                print(e)
+                print('Failed to remove widget named FileList')
+
+
+# -------------------------------------
+# end of class FileListWidget
 # -------------------------------------
 
 
