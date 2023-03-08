@@ -1247,6 +1247,9 @@ class AnnotatorJ(QWidget):
             'visible':False
         }
 
+        # check if the class widget needs to be refreshed
+        refreshClassWidget=False
+
         # loop through the rois
         for curROI in rois:
             xy=curROI.coordinates() # a list of (x,y) coordinates in the wrong order
@@ -1273,6 +1276,10 @@ class AnnotatorJ(QWidget):
                     curColour=None
                     if self.classColourLUT is None:
                         self.initClassColourLUT(rois)
+                    # check if current class has a colour in the lut
+                    if not curClass in self.classColourLUT.keys():
+                        self.classColourLUT.update({curClass:self.colours[curClass-1]})
+                        refreshClassWidget=True
                     
                     curColour=self.classColourLUT[curClass]
                     roiColours.append(curColour)
@@ -1314,6 +1321,10 @@ class AnnotatorJ(QWidget):
             fillColour[-1]=0.5
         # edge_width=0.5 actually sets it to 1
         shapesLayer = Shapes(data=roiList,shape_type=roiType,name=layerName,edge_width=self.annotEdgeWidth,edge_color=roiColours,face_color=fillColour,properties=roiProps,text=roiTextProps)
+
+        if refreshClassWidget and self.classMode and self.chckbxClass.isChecked() and self.classesFrame is not None:
+            self.classesFrame.closeClassesFrame()
+            self.classesFrame=ClassesFrame(self.viewer,self)
 
         return shapesLayer
 
