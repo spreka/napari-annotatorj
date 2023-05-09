@@ -5757,7 +5757,10 @@ class ClassesFrame(QWidget):
 
             # set selected colour for the previously selected class and colour
             selectedClassNameVar='Class_{:02d}'.format(self.annotatorjObj.selectedClassNameNumber)
-            selectedClassIdxList=self.annotatorjObj.classFrameNames.index(selectedClassNameVar)
+            if selectedClassNameVar in self.annotatorjObj.classFrameNames:
+                selectedClassIdxList=self.annotatorjObj.classFrameNames.index(selectedClassNameVar)
+            else:
+                selectedClassIdxList=-1
             if selectedClassIdxList==-1:
                 # could not find the selected class in the list e.g. if reimport didnt work well
                 print('Could not find the selected class in the list of classes, using the first.')
