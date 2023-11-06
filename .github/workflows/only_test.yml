@@ -58,10 +58,12 @@ jobs:
           python -m pip install pytest pytest-cookies tox
 
       # this runs the platform-specific tests declared in tox.ini
-      - name: Test
+      - name: Test with tox
         uses: aganders3/headless-gui@v1
         with:
-          run: python -m pytest -s -v --color=yes
+          run: python -m tox
+        env:
+          PLATFORM: ${{ matrix.platform }}
 
       - name: Coverage
         uses: codecov/codecov-action@v3
