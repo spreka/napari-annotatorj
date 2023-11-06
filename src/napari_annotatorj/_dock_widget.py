@@ -128,7 +128,7 @@ class AnnotatorJ(QWidget):
         self.curPredictionImage=None
         self.curPredictionImageName=None
         self.curOrigImage=None
-        self.allowContAssistBbox=True
+        self.allowContAssistBbox=False #True
         # '0' is the default GPU if any, otherwise fall back to cpu
         # valid values are: ['cpu','0','1','2',...]
         self.gpuSetting='cpu'
@@ -461,6 +461,8 @@ class AnnotatorJ(QWidget):
             if os.path.exists(self.test_image):
                 img=skimage.io.imread(self.test_image)
                 print('Test image read successfully')
+                self.defDir=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),'demo/')
+                self.defFile='img.png'
             else:
                 print('Test image could not be found')
         else:
@@ -837,6 +839,8 @@ class AnnotatorJ(QWidget):
             roiLayer.mode='add_polygon'
             if self.freeHandROIvis not in roiLayer.mouse_drag_callbacks:
                 roiLayer.mouse_drag_callbacks.append(self.freeHandROIvis)
+
+            self.initShapeControls()
             
             # chkbx setting moved to its own fcn initChkBoxes
         
@@ -880,6 +884,8 @@ class AnnotatorJ(QWidget):
             roiLayer.mode='add_rectangle'
             if self.freeHandROIvis in roiLayer.mouse_drag_callbacks:
                 roiLayer.mouse_drag_callbacks.remove(self.freeHandROIvis)
+
+            self.initShapeControls()
 
             # chkbx setting moved to its own fcn initChkBoxes
 
@@ -1083,6 +1089,7 @@ class AnnotatorJ(QWidget):
         self.bindKeys(roiLayer)
 
 
+    '''
     def loadROIs2(self):
         # temporarily load a test ImageJ ROI.zip file with contours created in ImageJ and saved with AnnotatorJ
         # later this will start a browser dialog to select the annotation file
@@ -1117,6 +1124,7 @@ class AnnotatorJ(QWidget):
         #shapesLayer.mode = 'select'
         # select the "add polygon" mode from the controls by default to enable freehand ROI drawing
         shapesLayer.mode = 'add_polygon'
+    '''
 
     def initRoiManager(self):
         # the rois will be stored in this object as in ImageJ's RoiManager
@@ -1397,7 +1405,10 @@ class AnnotatorJ(QWidget):
         roiLayer=self.findROIlayer(layerName=layerName)
         if roiLayer is not None:
             roiLayer.add_polygons(shapes,edge_width=self.annotEdgeWidth,edge_color=roiColours,face_color=[0,0,0,0])
-            roiLayer.properties=roiProps
+            #roiLayer.properties=roiProps
+            numpy.append(roiLayer.properties['class'],numpy.array(roiProps['class']))
+            numpy.append(roiLayer.properties['name'],roiProps['name'])
+            numpy.append(roiLayer.properties['nameInt'],numpy.array(roiProps['nameInt']))
 
         else:
             print(f'Cannot find the ROI layer')
@@ -3585,18 +3596,38 @@ class AnnotatorJ(QWidget):
         from napari._qt.layer_controls.qt_shapes_controls import QtShapesControls
 
         #shapeControls=None
-        if self.shapeControls is None:
-            for c in self.viewer.window._qt_viewer.controls.children():
-                if isinstance(c,QtShapesControls) and c.layer.name==layerName:
-                    self.shapeControls=c
-                    self.shapeControls.widthSlider.valueChanged.connect(self.updateEdgeWidths)
-                    break
+        self.initShapeControls(layerName=layerName)
         if self.shapeControls is None:
             print('Could not find the shapeControls')
             return
         else:
             #self.shapeControls.changeWidth(self.annotEdgeWidth)
             self.shapeControls.widthSlider.setValue(self.annotEdgeWidth)
+
+
+    def initShapeControls(self,layerName='ROI',reinit=False):
+        from napari._qt.layer_controls.qt_shapes_controls import QtShapesControls
+        #if self.shapeControls is None or reinit:
+        if self.shapeControls is not None:
+            # check if valid
+            try:
+                self.shapeControls.widthSlider.name()
+                self.doInitShapeControls(layerName)
+            except Exception as e:
+                # does not exist
+                self.doInitShapeControls(layerName)
+        else:
+            self.doInitShapeControls(layerName)
+        
+    
+    def doInitShapeControls(self,layerName='ROI'):
+        from napari._qt.layer_controls.qt_shapes_controls import QtShapesControls
+        for c in self.viewer.window._qt_viewer.controls.children():
+                if isinstance(c,QtShapesControls) and c.layer.name==layerName:
+                    self.shapeControls=c
+                    self.shapeControls.widthSlider.valueChanged.connect(self.updateEdgeWidths)
+                    print(f'---- reinited shape controls to layer {layerName}')
+                    break
 
 
     def updateEdgeWidths(self,value):
@@ -8587,6 +8618,7 @@ class OptionsFrame(QWidget):
                 if self.annotatorjObj.freeHandROIvis not in roiLayer.mouse_drag_callbacks:
                     roiLayer.mouse_drag_callbacks.append(self.annotatorjObj.freeHandROIvis)
                 self.annotatorjObj.viewer.layers.selection.add(roiLayer)
+                self.annotatorjObj.initShapeControls(reinit=True)
             elif newAnnotType=='bbox':
                 roiLayer=self.annotatorjObj.findROIlayer()
                 if roiLayer is None:
@@ -8596,6 +8628,7 @@ class OptionsFrame(QWidget):
                 if self.annotatorjObj.freeHandROIvis in roiLayer.mouse_drag_callbacks:
                     roiLayer.mouse_drag_callbacks.remove(self.annotatorjObj.freeHandROIvis)
                 self.annotatorjObj.viewer.layers.selection.add(roiLayer)
+                self.annotatorjObj.initShapeControls(reinit=True)
             elif newAnnotType=='semantic':
                 labelLayer=self.annotatorjObj.findLabelsLayerName(layerName='semantic')
                 if labelLayer is None:
@@ -10472,10 +10505,11 @@ class FileListWidget(QWidget):
         fileList=QListWidget()
         fileList.setSelectionMode(QAbstractItemView.SingleSelection)
 
-        for fi,f in enumerate(annotatorjObj.curFileList):
-            fileList.insertItem(fi,f)
+        if annotatorjObj.curFileList is not None:
+            for fi,f in enumerate(annotatorjObj.curFileList):
+                fileList.insertItem(fi,f)
 
-        fileList.setCurrentItem(fileList.item(annotatorjObj.curFileIdx))
+            fileList.setCurrentItem(fileList.item(annotatorjObj.curFileIdx))
 
         fileList.currentItemChanged.connect(callback)
 

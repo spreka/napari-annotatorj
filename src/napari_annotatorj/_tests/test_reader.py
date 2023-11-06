@@ -9,7 +9,7 @@ def write_im_to_file(tmp_path):
     def write_func(filename):
         # write some fake data using your supported file format
         #my_test_file = str(tmp_path / "myfile.npy")
-        my_test_file = str(tmp_path / "myfile.tiff")
+        my_test_file = str(tmp_path / filename)
         original_data = np.random.rand(20, 20)
         #np.save(my_test_file, original_data)
         skimage.io.imsave(my_test_file, original_data)

@@ -89,3 +89,5 @@ masks
 src/napari_annotatorj/models/*
 src/napari_annotatorj/unet/__pycache__/
 src/napari_annotatorj/default_models/*
+src/napari_annotatorj/pyinstaller/
+src/napari_annotatorj/build/
