@@ -66,6 +66,7 @@ jobs:
           run: python -m tox
         env:
           PLATFORM: ${{ matrix.platform }}
+          AWS_EC2_METADATA_DISABLED: true
 
       - name: Coverage
         uses: codecov/codecov-action@v3
