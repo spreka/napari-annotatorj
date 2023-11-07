@@ -64,8 +64,9 @@ jobs:
       #aganders3/headless-gui@v1
       - name: Test with tox
         #uses: GabrielBB/xvfb-action@v1
-        with:
-          run: python -m tox
+        #with:
+        #  run: python -m tox
+        run: python -m tox
         env:
           PLATFORM: ${{ matrix.platform }}
           AWS_EC2_METADATA_DISABLED: true
