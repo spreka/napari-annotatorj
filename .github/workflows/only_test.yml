@@ -63,7 +63,7 @@ jobs:
       #GabrielBB/xvfb-action@v1
       #aganders3/headless-gui@v1
       - name: Test with tox
-        uses: GabrielBB/xvfb-action@v1
+        #uses: GabrielBB/xvfb-action@v1
         with:
           run: python -m tox
         env:
