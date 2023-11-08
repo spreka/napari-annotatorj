@@ -59,6 +59,20 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install pytest pytest-cookies tox
 
+      - name: Download model
+        working-directory: src
+        run: |
+          if [[ ! -f napari_annotatorj/models/model_real_weights.h5 ]]; then
+            wget -q -O models.zip https://github.com/spreka/annotatorj/releases/download/v0.0.2-model/models.zip && unzip models.zip;
+          fi
+
+      - name: Cache
+        uses: actions/cache@v2
+        with:
+          path: |
+            src/napari_annotatorj/models
+          key: full-data
+
       # this runs the platform-specific tests declared in tox.ini
       #GabrielBB/xvfb-action@v1
       #aganders3/headless-gui@v1
