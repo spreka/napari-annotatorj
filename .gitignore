@@ -84,7 +84,7 @@ target/
 # testing
 demo/masks
 demo/masks_prev
-demo/img_ROIs_classes.zip
+#demo/img_ROIs_classes.zip
 masks
 src/napari_annotatorj/models/*
 src/napari_annotatorj/unet/__pycache__/
