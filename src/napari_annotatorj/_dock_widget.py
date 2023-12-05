@@ -515,6 +515,7 @@ class AnnotatorJ(QWidget):
             self.annotTimes=DataFrame({'#':[],'label':[],'time':[]})
             self.annotCount=0
             self.lastStartTime=time()
+            self.roiCount=0
 
         if self.fileListWidget is not None and self.fileListWidget.fileFolder!=self.defDir:
             # reinit the file list
@@ -3510,8 +3511,8 @@ class AnnotatorJ(QWidget):
             if self.saveAnnotTimes:
                 # measure time
                 curTime=round((time()-self.lastStartTime)*1000) #ms time
-                print(self.annotTimes)
                 self.annotTimes.loc[0]=[self.annotCount,roiLayer.properties['name'][-1],curTime]
+                print(self.annotTimes)
                 self.annotCount+=1
         elif n==0:
             # this should never happen
@@ -3529,8 +3530,8 @@ class AnnotatorJ(QWidget):
             if self.saveAnnotTimes:
                 # measure time
                 curTime=round((time()-self.lastStartTime)*1000) #ms time
-                print(self.annotTimes)
                 self.annotTimes.loc[len(self.annotTimes.index)]=[self.annotCount,roiLayer.properties['name'][-1],curTime]
+                print(self.annotTimes)
                 self.annotCount+=1
         elif self.roiCount>n:
             self.roiCount=n-1
