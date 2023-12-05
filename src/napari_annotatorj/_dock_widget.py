@@ -6,7 +6,7 @@ see: https://napari.org/docs/dev/plugins/hook_specifications.html
 
 Replace code below according to your needs.
 """
-from time import sleep
+from time import sleep,time
 from qtpy.QtWidgets import QWidget, QHBoxLayout,QVBoxLayout,QFormLayout,QPushButton,QCheckBox,QLabel,QMessageBox,QFileDialog,QDialog,QComboBox,QListWidget,QAbstractItemView,QLineEdit,QMenu,QRadioButton,QSlider,QFrame,QScrollArea,QButtonGroup,QTextEdit,QProgressBar,QSpinBox
 import pyqtgraph
 from magicgui import magic_factory
@@ -35,6 +35,7 @@ from tqdm import tqdm
 from tensorflow.python.keras.callbacks import Callback
 import tensorflow.math
 from tensorflow import convert_to_tensor
+from pandas import DataFrame as DataFrame
 
 # suppress numpy's FutureWarning: numpy\core\numeric.py:2449: FutureWarning: elementwise comparison failed; returning scalar instead, but in the future will perform elementwise comparison!
 warnings.filterwarnings('ignore', category=FutureWarning)
@@ -195,6 +196,11 @@ class AnnotatorJ(QWidget):
         # read options from file if exists
         self.params=None
         self.initParams()
+
+        # annot times
+        self.annotTimes=DataFrame({'#':[],'label':[],'time':[]})
+        self.annotCount=0
+        self.lastStartTime=time()
 
         # for dock tabs
         self.firstDockWidget=None
@@ -503,6 +509,12 @@ class AnnotatorJ(QWidget):
         # finish initializing params and checkboxes
         # moved to its own fcn
         self.finishOpenNewInit()
+
+        # annot times option
+        if self.saveAnnotTimes:
+            self.annotTimes=DataFrame({'#':[],'label':[],'time':[]})
+            self.annotCount=0
+            self.lastStartTime=time()
 
         if self.fileListWidget is not None and self.fileListWidget.fileFolder!=self.defDir:
             # reinit the file list
@@ -2338,6 +2350,27 @@ class AnnotatorJ(QWidget):
             self.defFile='img.png'
 
     def saveData(self):
+        # check boolean if annot times should be saved to file
+        if self.saveAnnotTimes:
+            # save annot time in file
+            annotFolder=os.path.join(self.defDir,'annotTimes')
+            os.makedirs(annotFolder,exist_ok=True)
+            print(f'Created output folder: {annotFolder}')
+            annotFileNameRaw=os.path.splitext(os.path.basename(self.destNameRaw))[0]+'.csv' #'annotTimes.csv'
+            annotFileName=os.path.join(annotFolder,annotFileNameRaw)
+            if os.path.isfile(annotFileName):
+                annotFileName=os.path.join(annotFolder,annotFileNameRaw[:annotFileNameRaw.rfind('.')]+'_1.csv')
+                newFileNum2=1
+                while os.path.isfile(annotFileName):
+                    newFileNum2+=1
+                    annotFileName=os.path.join(annotFolder,annotFileNameRaw[:annotFileNameRaw.rfind('.')]+'_'+str(newFileNum2)+'.csv')
+
+            successfullySaved=self.saveAnnotTimes2file(self.annotTimes,annotFileName)
+            if successfullySaved:
+                print(f'Saved annotation times in file: {annotFileName}')
+            # TODO: delete this!!!!!! ^
+
+
         # open a save dialog and save the rois to an imagej compatible roi.zip file
         self.finishedSaving=False
         if not self.started or (self.findImageLayer() is None or self.findImageLayer().data is None):
@@ -2475,6 +2508,11 @@ class AnnotatorJ(QWidget):
 
         print('finished saving')
         self.finishedSaving=True
+
+
+    def saveAnnotTimes2file(self,time,fileName):
+        success=time.to_csv(fileName)
+        return success
 
 
 
@@ -3468,6 +3506,13 @@ class AnnotatorJ(QWidget):
         if n==1:
             # empty shapes layer, init the props
             roiLayer.properties={'name':['0001'],'class':[0],'nameInt':[1]}
+
+            if self.saveAnnotTimes:
+                # measure time
+                curTime=round((time()-self.lastStartTime)*1000) #ms time
+                print(self.annotTimes)
+                self.annotTimes.loc[0]=[self.annotCount,roiLayer.properties['name'][-1],curTime]
+                self.annotCount+=1
         elif n==0:
             # this should never happen
             print('update ROI props function called on empty layer')
@@ -3480,6 +3525,13 @@ class AnnotatorJ(QWidget):
             roiLayer.properties['name'][-1]='{:04d}'.format(lastNumber+1)
             # default class is 0 (no class)
             roiLayer.properties['class'][-1]=0
+
+            if self.saveAnnotTimes:
+                # measure time
+                curTime=round((time()-self.lastStartTime)*1000) #ms time
+                print(self.annotTimes)
+                self.annotTimes.loc[len(self.annotTimes.index)]=[self.annotCount,roiLayer.properties['name'][-1],curTime]
+                self.annotCount+=1
         elif self.roiCount>n:
             self.roiCount=n-1
         else:
@@ -3491,6 +3543,9 @@ class AnnotatorJ(QWidget):
         self.roiCount=len(roiLayer.data)
         print(f'roiCount: {self.roiCount}')
         self.roiLayer=roiLayer
+
+        if self.saveAnnotTimes:
+            self.lastStartTime=time()
 
 
     def initROItextProps(self):
@@ -8250,8 +8305,8 @@ class OptionsFrame(QWidget):
         self.saveAnnotTimesChkBx.setToolTip('Save annotation times to .csv file per object')
         self.saveAnnotTimesChkBx.setChecked(self.annotatorjObj.saveAnnotTimes)
         self.saveAnnotTimesChkBx.stateChanged.connect(self.setSaveAnnotTimes)
-        self.saveAnnotTimesChkBx.setEnabled(False)
-        self.saveAnnotTimesChkBx.setStyleSheet("color: gray")
+        #self.saveAnnotTimesChkBx.setEnabled(False)
+        #self.saveAnnotTimesChkBx.setStyleSheet("color: gray")
 
         # enable roi auto roi load when stepping 
         self.autoROIloadChkBx=QCheckBox('Auto ROI load')
