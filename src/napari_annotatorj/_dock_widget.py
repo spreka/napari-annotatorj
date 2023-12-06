@@ -2512,7 +2512,7 @@ class AnnotatorJ(QWidget):
 
 
     def saveAnnotTimes2file(self,time,fileName):
-        success=time.to_csv(fileName)
+        success=time.to_csv(fileName,index=False)
         return success
 
 
@@ -2604,6 +2604,7 @@ class AnnotatorJ(QWidget):
     def freeHandROIvis(self,layer, event):
         yield
         if layer.mode=='add_polygon':
+            self.lastStartTime=time()
             self.viewer.window.qt_viewer.layer_to_visual[layer].node._subvisuals[3].visible=False
             dragged=False
             #self.defColour='white' 
@@ -2674,6 +2675,15 @@ class AnnotatorJ(QWidget):
 
                 if self.contAssist and not self.inAssisting:
                     self.contAssistROI()
+                
+                elif self.saveAnnotTimes:
+                    # measure time
+                    curTime=round((time()-self.lastStartTime)*1000) #ms time
+                    roiLayer=self.findROIlayer()
+                    self.annotTimes.loc[len(self.annotTimes.index)]=[self.annotCount,roiLayer.properties['name'][-1],curTime]
+                    print(self.annotTimes)
+                    self.annotCount+=1
+
                 pass
             if not self.contAssist:
                 self.viewer.window.qt_viewer.layer_to_visual[layer].node._subvisuals[3].visible=True
@@ -3076,6 +3086,13 @@ class AnnotatorJ(QWidget):
 
             # store updated brush size
             self.correctionBrushSize=labelLayer.brush_size
+
+            if self.saveAnnotTimes:
+                # measure time
+                curTime=round((time()-self.lastStartTime)*1000) #ms time
+                self.annotTimes.loc[len(self.annotTimes.index)]=[self.annotCount,roiLayer.properties['name'][-1],curTime]
+                print(self.annotTimes)
+                self.annotCount+=1
 
             # clear everything
             self.cleanUpAfterContAssist(labelLayer,roiLayer)
@@ -3507,13 +3524,6 @@ class AnnotatorJ(QWidget):
         if n==1:
             # empty shapes layer, init the props
             roiLayer.properties={'name':['0001'],'class':[0],'nameInt':[1]}
-
-            if self.saveAnnotTimes:
-                # measure time
-                curTime=round((time()-self.lastStartTime)*1000) #ms time
-                self.annotTimes.loc[0]=[self.annotCount,roiLayer.properties['name'][-1],curTime]
-                print(self.annotTimes)
-                self.annotCount+=1
         elif n==0:
             # this should never happen
             print('update ROI props function called on empty layer')
@@ -3526,13 +3536,6 @@ class AnnotatorJ(QWidget):
             roiLayer.properties['name'][-1]='{:04d}'.format(lastNumber+1)
             # default class is 0 (no class)
             roiLayer.properties['class'][-1]=0
-
-            if self.saveAnnotTimes:
-                # measure time
-                curTime=round((time()-self.lastStartTime)*1000) #ms time
-                self.annotTimes.loc[len(self.annotTimes.index)]=[self.annotCount,roiLayer.properties['name'][-1],curTime]
-                print(self.annotTimes)
-                self.annotCount+=1
         elif self.roiCount>n:
             self.roiCount=n-1
         else:
@@ -3544,9 +3547,6 @@ class AnnotatorJ(QWidget):
         self.roiCount=len(roiLayer.data)
         print(f'roiCount: {self.roiCount}')
         self.roiLayer=roiLayer
-
-        if self.saveAnnotTimes:
-            self.lastStartTime=time()
 
 
     def initROItextProps(self):
