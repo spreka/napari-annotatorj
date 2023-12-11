@@ -9751,8 +9751,10 @@ class TrainWidget(QWidget):
             width,height=self.prepOrigFolder(self.originalFolder)
 
             ms=0
+            maskDir=os.path.join(self.trainDataFolder,'unet_masks')
             for mask in self.curExpList:
                 if os.path.isfile(os.path.join(self.annotationFolder,mask)):
+                    from shutil import copyfile
                     copyfile(os.path.join(self.annotationFolder,mask),os.path.join(maskDir,mask))
                     ms+=1
             if ms>0:
@@ -9867,6 +9869,7 @@ class TrainWidget(QWidget):
 
             ims=0
             img=None
+            imDir=os.path.join(self.trainDataFolder,'images')
             for im in self.curFileList:
                 if os.path.isfile(os.path.join(origFolder,im)):
                     from shutil import copyfile
