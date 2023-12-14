@@ -39,7 +39,7 @@ from pandas import DataFrame as DataFrame
 
 # suppress numpy's FutureWarning: numpy\core\numeric.py:2449: FutureWarning: elementwise comparison failed; returning scalar instead, but in the future will perform elementwise comparison!
 warnings.filterwarnings('ignore', category=FutureWarning)
-
+# mod for new release
 
 class AnnotatorJ(QWidget):
     # your QWidget.__init__ can optionally request the napari viewer instance
